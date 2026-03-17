@@ -19,6 +19,7 @@
     <ProjectReference Include="..\..\src\AgileAI.Abstractions\AgileAI.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\AgileAI.Core\AgileAI.Core.csproj" />
     <ProjectReference Include="..\..\src\AgileAI.Providers.OpenAI\AgileAI.Providers.OpenAI.csproj" />
+    <ProjectReference Include="..\..\src\AgileAI.Providers.AzureOpenAI\AgileAI.Providers.AzureOpenAI.csproj" />
   </ItemGroup>
 
   <ItemGroup>

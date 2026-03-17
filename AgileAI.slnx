@@ -3,10 +3,12 @@
     <Project Path="src/AgileAI.Abstractions/AgileAI.Abstractions.csproj" />
     <Project Path="src/AgileAI.Core/AgileAI.Core.csproj" />
     <Project Path="src/AgileAI.Providers.OpenAI/AgileAI.Providers.OpenAI.csproj" />
+    <Project Path="src/AgileAI.Providers.AzureOpenAI/AgileAI.Providers.AzureOpenAI.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/ConsoleChat/ConsoleChat.csproj" />
     <Project Path="samples/ToolCallingSample/ToolCallingSample.csproj" />
+    <Project Path="samples/AzureOpenAIChat/AzureOpenAIChat.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/AgileAI.Tests/AgileAI.Tests.csproj" />

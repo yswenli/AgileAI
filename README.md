@@ -11,6 +11,10 @@ A lightweight .NET AI SDK for building chat applications with provider routing, 
   - non-streaming responses
   - streaming responses
   - tool calling
+- Azure OpenAI Chat Completions support
+  - deployment-based routing
+  - `api-key` authentication
+  - Azure-style endpoint + `api-version`
 - Chat session management with conversation history
 - In-memory tool registry and tool execution loop
 - Dependency injection support
@@ -23,10 +27,12 @@ AgileAI.slnx
 ├── src/
 │   ├── AgileAI.Abstractions/         # Core contracts and models
 │   ├── AgileAI.Core/                 # Chat client, session, registries
-│   └── AgileAI.Providers.OpenAI/     # OpenAI provider implementation
+│   ├── AgileAI.Providers.OpenAI/     # OpenAI provider implementation
+│   └── AgileAI.Providers.AzureOpenAI/# Azure OpenAI provider implementation
 ├── samples/
 │   ├── ConsoleChat/                  # Minimal chat sample
-│   └── ToolCallingSample/            # Tool calling sample
+│   ├── ToolCallingSample/            # Tool calling sample
+│   └── AzureOpenAIChat/              # Azure OpenAI sample
 └── tests/
     └── AgileAI.Tests/                # Unit tests
 ```
@@ -51,11 +57,15 @@ AgileAI.slnx
 - in-memory registries for tools and skills
 - dependency injection helpers
 
-### 3. Provider
-`AgileAI.Providers.OpenAI` currently implements OpenAI chat completion support with:
+### 3. Providers
+`AgileAI.Providers.OpenAI` implements standard OpenAI chat completion support.
 
-- request mapping
-- response mapping
+`AgileAI.Providers.AzureOpenAI` implements Azure OpenAI chat completion support with Azure-specific behavior:
+
+- deployment-based URL routing
+- `api-key` header authentication
+- `api-version` query parameter
+- request mapping and response mapping
 - streaming SSE parsing
 - tool call delta handling
 - retry support for transient failures
@@ -159,6 +169,69 @@ Retry behavior is intended for transient failures such as:
 - network errors
 - request timeout
 
+## Azure OpenAI Usage
+
+Azure OpenAI differs from standard OpenAI in a few important ways:
+
+- you route by **deployment name**, not raw model name
+- requests go to `/openai/deployments/{deployment}/chat/completions`
+- authentication uses the `api-key` header
+- requests require an `api-version` query parameter
+
+### Direct Usage
+
+```csharp
+using AgileAI.Abstractions;
+using AgileAI.Core;
+using AgileAI.Providers.AzureOpenAI;
+
+var provider = new AzureOpenAIChatModelProvider(
+    new HttpClient(),
+    new AzureOpenAIOptions
+    {
+        Endpoint = "https://your-resource.openai.azure.com/",
+        ApiKey = "your-api-key",
+        ApiVersion = "2024-02-01"
+    });
+
+var chatClient = new ChatClient();
+chatClient.RegisterProvider(provider);
+
+var response = await chatClient.CompleteAsync(new ChatRequest
+{
+    ModelId = "azure-openai:your-deployment-name",
+    Messages = [ChatMessage.User("Hello")]
+});
+```
+
+### Dependency Injection
+
+```csharp
+using AgileAI.DependencyInjection;
+using AgileAI.Providers.AzureOpenAI.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
+
+var services = new ServiceCollection();
+services.AddAgileAI();
+services.AddAzureOpenAIProvider(options =>
+{
+    options.Endpoint = "https://your-resource.openai.azure.com/";
+    options.ApiKey = "your-api-key";
+    options.ApiVersion = "2024-02-01";
+});
+```
+
+### Azure OpenAI Options
+
+`AzureOpenAIOptions` supports:
+
+- `Endpoint`
+- `ApiKey`
+- `ApiVersion`
+- `RequestTimeout`
+- `MaxRetryCount`
+- `InitialRetryDelay`
+
 ## Streaming Semantics
 
 The current streaming implementation includes some intentional semantics worth noting:
@@ -172,7 +245,8 @@ The current streaming implementation includes some intentional semantics worth n
 
 Recent work added and validated coverage for:
 
-- request mapping
+- OpenAI request mapping
+- Azure OpenAI deployment URL + `api-key` header behavior
 - tool definition mapping
 - tool call response mapping
 - null / empty `choices`
@@ -186,7 +260,7 @@ Recent work added and validated coverage for:
 
 Current result:
 
-- **49 tests passed**
+- **52 tests passed**
 - **0 failed**
 
 ## Build
@@ -203,13 +277,11 @@ dotnet test AgileAI.slnx
 
 ## Run Samples
 
-Set your OpenAI API key first:
+For OpenAI samples:
 
 ```bash
 export OPENAI_API_KEY="your-api-key"
 ```
-
-Then run a sample:
 
 ```bash
 cd samples/ConsoleChat
@@ -220,6 +292,20 @@ or:
 
 ```bash
 cd samples/ToolCallingSample
+dotnet run
+```
+
+For Azure OpenAI:
+
+```bash
+export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/"
+export AZURE_OPENAI_API_KEY="your-api-key"
+export AZURE_OPENAI_DEPLOYMENT="your-deployment-name"
+export AZURE_OPENAI_API_VERSION="2024-02-01"
+```
+
+```bash
+cd samples/AzureOpenAIChat
 dotnet run
 ```
 
