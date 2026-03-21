@@ -21,14 +21,6 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<IChatModelProvider>(sp => sp.GetRequiredService<AzureOpenAIChatModelProvider>());
 
-        services.AddSingleton<ChatClient>(sp =>
-        {
-            var chatClient = new ChatClient();
-            var provider = sp.GetRequiredService<IChatModelProvider>();
-            chatClient.RegisterProvider(provider);
-            return chatClient;
-        });
-
         return services;
     }
 }

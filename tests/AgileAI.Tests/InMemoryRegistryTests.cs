@@ -97,11 +97,13 @@ public class InMemoryRegistryTests
     {
         public string Name { get; }
         public string? Description { get; }
+        public SkillManifest? Manifest { get; }
 
         public MockSkill(string name, string? description)
         {
             Name = name;
             Description = description;
+            Manifest = new SkillManifest { Name = name, Description = description };
         }
 
         public Task<AgentResult> ExecuteAsync(SkillExecutionContext context, CancellationToken cancellationToken = default)

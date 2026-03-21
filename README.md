@@ -116,6 +116,34 @@ var serviceProvider = services.BuildServiceProvider();
 var chatClient = serviceProvider.GetRequiredService<IChatClient>();
 ```
 
+## Runtime Session Continuation (SessionId)
+
+If you use `IAgentRuntime`, pass a stable `SessionId` to reuse persisted conversation state (history + active skill):
+
+```csharp
+using AgileAI.Abstractions;
+
+var runtime = serviceProvider.GetRequiredService<IAgentRuntime>();
+
+var turn1 = await runtime.ExecuteAsync(new AgentRequest
+{
+    SessionId = "demo-session-001",
+    ModelId = "openai:gpt-4o",
+    Input = "Plan my trip to Tokyo",
+    EnableSkills = true
+});
+
+var turn2 = await runtime.ExecuteAsync(new AgentRequest
+{
+    SessionId = "demo-session-001", // same session id => continue context
+    ModelId = "openai:gpt-4o",
+    Input = "Now switch to budget options only",
+    EnableSkills = true
+});
+```
+
+By default, `AddAgileAI()` registers an in-memory `ISessionStore` and default skill continuation policy.
+
 ## Streaming Example
 
 ```csharp

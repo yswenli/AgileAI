@@ -20,6 +20,9 @@
     <ProjectReference Include="..\..\src\AgileAI.Core\AgileAI.Core.csproj" />
     <ProjectReference Include="..\..\src\AgileAI.Providers.OpenAI\AgileAI.Providers.OpenAI.csproj" />
     <ProjectReference Include="..\..\src\AgileAI.Providers.AzureOpenAI\AgileAI.Providers.AzureOpenAI.csproj" />
+    <ProjectReference Include="..\..\src\AgileAI.Providers.OpenAIResponses\AgileAI.Providers.OpenAIResponses.csproj" />
+    <ProjectReference Include="..\..\src\AgileAI.Providers.Gemini\AgileAI.Providers.Gemini.csproj" />
+    <ProjectReference Include="..\..\src\AgileAI.Providers.Claude\AgileAI.Providers.Claude.csproj" />
   </ItemGroup>
 
   <ItemGroup>

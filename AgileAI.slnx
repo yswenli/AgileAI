@@ -4,6 +4,9 @@
     <Project Path="src/AgileAI.Core/AgileAI.Core.csproj" />
     <Project Path="src/AgileAI.Providers.OpenAI/AgileAI.Providers.OpenAI.csproj" />
     <Project Path="src/AgileAI.Providers.AzureOpenAI/AgileAI.Providers.AzureOpenAI.csproj" />
+    <Project Path="src/AgileAI.Providers.OpenAIResponses/AgileAI.Providers.OpenAIResponses.csproj" />
+    <Project Path="src/AgileAI.Providers.Gemini/AgileAI.Providers.Gemini.csproj" />
+    <Project Path="src/AgileAI.Providers.Claude/AgileAI.Providers.Claude.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/ConsoleChat/ConsoleChat.csproj" />
