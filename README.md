@@ -140,6 +140,21 @@ The Vite app reads `VITE_API_BASE_URL` when provided; otherwise it defaults to `
 - create, edit, pin, and delete agents
 - start conversations and stream replies in the chat workspace
 - run desktop e2e checks with Playwright
+- switch between light and dark UI themes inside the Studio shell
+
+### Real OpenAI-Compatible Providers
+
+AgileAI.Studio can validate and chat against real OpenAI-compatible services.
+
+For an OpenAI-compatible provider, configure:
+
+- provider type: `OpenAI Compatible`
+- base URL: the provider's OpenAI-compatible root URL
+- runtime provider name: a stable provider key such as `openapi`, `openrouter`, or your internal alias
+- model key: the exact model/deployment name exposed by that provider
+- API key: the real bearer token or compatible credential
+
+If you have an OpenAI-compatible endpoint for a model such as `gpt-5.4`, add it through the Models page and use the built-in `Test` action. The test sends a live minimal completion request and reports the model response.
 
 ### Screenshots
 

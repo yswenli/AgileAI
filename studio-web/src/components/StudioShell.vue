@@ -2,6 +2,14 @@
 import { RouterLink, useRoute } from 'vue-router'
 import { NButton, NLayout, NLayoutSider, NTag } from 'naive-ui'
 
+defineProps<{
+  themeMode: 'light' | 'dark'
+}>()
+
+defineEmits<{
+  toggleTheme: []
+}>()
+
 const route = useRoute()
 
 const navItems = [
@@ -28,7 +36,12 @@ const navItems = [
           <p class="eyebrow">Version One</p>
           <h2>Model-driven AI workspace</h2>
         </div>
-        <n-tag size="small" round type="success">Local-first</n-tag>
+        <div class="shell-tags">
+          <n-tag size="small" round type="success">Local-first</n-tag>
+          <n-button size="small" secondary @click="$emit('toggleTheme')">
+            {{ themeMode === 'dark' ? 'Light Mode' : 'Dark Mode' }}
+          </n-button>
+        </div>
       </div>
 
       <nav class="nav-list">

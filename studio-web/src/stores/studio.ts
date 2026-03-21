@@ -201,7 +201,7 @@ export const useStudioStore = defineStore('studio', {
       this.streamError = ''
 
       try {
-        const streamTask = streamMessage(conversationId, normalizedContent, {
+        await streamMessage(conversationId, normalizedContent, {
           onStart: ({ conversation, userMessage, assistantMessage }) => {
             this.messagesByConversation[conversationId] = [...existing, userMessage, assistantMessage]
             const matched = this.conversations.some((item) => item.id === conversationId)
@@ -270,38 +270,20 @@ export const useStudioStore = defineStore('studio', {
           },
           onError: (message) => {
             this.streamError = message
+            const list = [...(this.messagesByConversation[conversationId] ?? [])]
+            const last = list.at(-1)
+            if (!last) {
+              return
+            }
+
+            list[list.length - 1] = {
+              ...last,
+              content: message,
+              isStreaming: false,
+            }
+            this.messagesByConversation[conversationId] = list
           },
         })
-
-        const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
-
-        await Promise.race([streamTask.catch(() => undefined), wait(2000)])
-        await this.fetchMessages(conversationId)
-
-        for (let attempt = 0; attempt < 5; attempt += 1) {
-          const assistantHasContent = (this.messagesByConversation[conversationId] ?? []).some(
-            (item) => item.role === 'Assistant' && item.content.trim().length > 0,
-          )
-          if (assistantHasContent) {
-            break
-          }
-
-          await wait(700)
-          await this.fetchMessages(conversationId)
-        }
-
-        await streamTask.catch(() => undefined)
-
-        const finalList = [...(this.messagesByConversation[conversationId] ?? [])]
-        const lastItem = finalList.at(-1)
-        if (lastItem?.role === 'Assistant' && !lastItem.content.trim()) {
-          finalList[finalList.length - 1] = {
-            ...lastItem,
-            content: this.streamError || 'Mock response from AgileAI Studio is available. Refresh the conversation to inspect the finalized transcript.',
-            isStreaming: false,
-          }
-          this.messagesByConversation[conversationId] = finalList
-        }
 
         await this.refreshOverview()
         this.conversations = await getConversations()

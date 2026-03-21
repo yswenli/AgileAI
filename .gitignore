@@ -6,3 +6,7 @@ TestResults/
 *.suo
 *.cache
 *.nupkg
+src/AgileAI.Studio.Api/studio*.db
+src/AgileAI.Studio.Api/studio*.db-shm
+src/AgileAI.Studio.Api/studio*.db-wal
+studio-web/test-results/

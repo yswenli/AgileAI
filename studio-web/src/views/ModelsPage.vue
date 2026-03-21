@@ -44,6 +44,34 @@ const providerOptions = [
   { label: 'Azure OpenAI', value: 'AzureOpenAI' },
 ]
 
+function applyProviderPreset(type: 'OpenAI' | 'OpenAICompatible' | 'AzureOpenAI') {
+  if (type === 'OpenAI') {
+    providerForm.baseUrl = 'https://api.openai.com/v1/'
+    providerForm.providerName = ''
+    providerForm.relativePath = 'chat/completions'
+    providerForm.authMode = 'Bearer'
+    providerForm.apiKeyHeaderName = ''
+    providerForm.endpoint = ''
+    return
+  }
+
+  if (type === 'OpenAICompatible') {
+    providerForm.baseUrl = 'https://api.openai.com/v1/'
+    providerForm.providerName = 'openapi'
+    providerForm.relativePath = 'chat/completions'
+    providerForm.authMode = 'Bearer'
+    providerForm.apiKeyHeaderName = ''
+    providerForm.endpoint = ''
+    return
+  }
+
+  providerForm.endpoint = 'https://your-resource.openai.azure.com/'
+  providerForm.baseUrl = ''
+  providerForm.providerName = ''
+  providerForm.relativePath = 'chat/completions'
+  providerForm.authMode = 'Bearer'
+}
+
 const providerConnectionOptions = computed(() =>
   store.providerConnections.map((item) => ({ label: `${item.name} · ${item.providerType}`, value: item.id })),
 )
@@ -105,6 +133,7 @@ function resetProviderForm() {
     apiVersion: '2024-02-01',
     isEnabled: true,
   })
+  applyProviderPreset('OpenAI')
 }
 
 function resetModelForm() {
@@ -294,12 +323,20 @@ async function handleTestModel(id: string) {
     <n-modal v-model:show="showProviderModal" preset="card" title="Provider connection" class="modal-shell">
       <n-form label-placement="top">
         <n-form-item label="Name"><n-input v-model:value="providerForm.name" data-testid="provider-name-input" /></n-form-item>
-        <n-form-item label="Provider type"><n-select v-model:value="providerForm.providerType" :options="providerOptions" /></n-form-item>
+        <n-form-item label="Provider type"><n-select v-model:value="providerForm.providerType" :options="providerOptions" @update:value="applyProviderPreset" /></n-form-item>
         <n-form-item label="API key"><n-input v-model:value="providerForm.apiKey" type="password" show-password-on="click" data-testid="provider-key-input" /></n-form-item>
         <n-form-item v-if="providerForm.providerType !== 'AzureOpenAI'" label="Base URL"><n-input v-model:value="providerForm.baseUrl" /></n-form-item>
         <n-form-item v-if="providerForm.providerType === 'AzureOpenAI'" label="Endpoint"><n-input v-model:value="providerForm.endpoint" /></n-form-item>
-        <n-form-item v-if="providerForm.providerType === 'OpenAICompatible'" label="Runtime provider name"><n-input v-model:value="providerForm.providerName" placeholder="openrouter" /></n-form-item>
+        <n-form-item v-if="providerForm.providerType === 'OpenAICompatible'" label="Runtime provider name"><n-input v-model:value="providerForm.providerName" placeholder="openapi" /></n-form-item>
         <n-form-item v-if="providerForm.providerType === 'OpenAICompatible'" label="Relative path"><n-input v-model:value="providerForm.relativePath" /></n-form-item>
+        <n-form-item v-if="providerForm.providerType === 'OpenAICompatible'" label="Tip">
+          <n-input
+            :value="'To use a real OpenAI-compatible endpoint such as the OpenCode GPT-5.4 provider, set Base URL, Provider Name, API key, and the model key exactly as required by that service.'"
+            type="textarea"
+            readonly
+            :autosize="{ minRows: 3, maxRows: 4 }"
+          />
+        </n-form-item>
         <n-form-item label="Enabled"><n-switch v-model:value="providerForm.isEnabled" /></n-form-item>
         <n-space justify="end"><n-button @click="showProviderModal = false">Cancel</n-button><n-button type="primary" :disabled="!isProviderValid" data-testid="save-provider" @click="submitProvider">Save</n-button></n-space>
       </n-form>
