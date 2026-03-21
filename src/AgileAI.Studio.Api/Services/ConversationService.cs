@@ -1,0 +1,144 @@
+using AgileAI.Studio.Api.Contracts;
+using AgileAI.Studio.Api.Data;
+using AgileAI.Studio.Api.Domain;
+using Microsoft.EntityFrameworkCore;
+
+namespace AgileAI.Studio.Api.Services;
+
+public class ConversationService(StudioDbContext dbContext)
+{
+    public async Task<IReadOnlyList<ConversationDto>> GetConversationsAsync(CancellationToken cancellationToken)
+    {
+        var items = await dbContext.Conversations
+            .Include(x => x.AgentDefinition)
+            .Include(x => x.Messages)
+            .ToListAsync(cancellationToken);
+
+        return items
+            .OrderByDescending(x => x.UpdatedAtUtc.UtcDateTime)
+            .Select(MapConversation)
+            .ToList();
+    }
+
+    public async Task<ConversationDto> CreateConversationAsync(ConversationCreateRequest request, CancellationToken cancellationToken)
+    {
+        var agent = await dbContext.Agents.FirstOrDefaultAsync(x => x.Id == request.AgentId, cancellationToken)
+            ?? throw new InvalidOperationException("Agent not found.");
+
+        var now = DateTimeOffset.UtcNow;
+        var conversation = new Conversation
+        {
+            Id = Guid.NewGuid(),
+            AgentDefinitionId = agent.Id,
+            AgentDefinition = agent,
+            Title = string.IsNullOrWhiteSpace(request.Title) ? $"{agent.Name} chat" : request.Title.Trim(),
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+
+        dbContext.Conversations.Add(conversation);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return MapConversation(conversation);
+    }
+
+    public async Task<IReadOnlyList<MessageDto>> GetMessagesAsync(Guid conversationId, CancellationToken cancellationToken)
+    {
+        var items = await dbContext.Messages
+            .Where(x => x.ConversationId == conversationId)
+            .ToListAsync(cancellationToken);
+
+        return items
+            .OrderBy(x => x.CreatedAtUtc.UtcDateTime)
+            .Select(MapMessage)
+            .ToList();
+    }
+
+    public async Task<Conversation> GetConversationEntityAsync(Guid id, CancellationToken cancellationToken)
+        => await dbContext.Conversations
+            .Include(x => x.AgentDefinition)
+            .ThenInclude(x => x!.StudioModel)
+            .ThenInclude(x => x!.ProviderConnection)
+            .Include(x => x.Messages)
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken)
+            ?? throw new InvalidOperationException("Conversation not found.");
+
+    public async Task<StudioOverviewDto> GetOverviewAsync(CancellationToken cancellationToken)
+    {
+        var recentConversations = await dbContext.Conversations
+            .Include(x => x.AgentDefinition)
+            .Include(x => x.Messages)
+            .ToListAsync(cancellationToken);
+
+        var modelCount = await dbContext.Models.CountAsync(cancellationToken);
+        var agentCount = await dbContext.Agents.CountAsync(cancellationToken);
+        var conversationCount = await dbContext.Conversations.CountAsync(cancellationToken);
+
+        return new StudioOverviewDto(
+            modelCount,
+            agentCount,
+            conversationCount,
+            recentConversations
+                .OrderByDescending(x => x.UpdatedAtUtc.UtcDateTime)
+                .Take(4)
+                .Select(MapConversation)
+                .ToList());
+    }
+
+    public async Task TouchConversationAsync(Conversation conversation, CancellationToken cancellationToken)
+    {
+        conversation.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<ConversationMessage> AddMessageAsync(Guid conversationId, MessageRole role, string content, bool isStreaming, string? finishReason, int? inputTokens, int? outputTokens, CancellationToken cancellationToken)
+    {
+        var message = new ConversationMessage
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = conversationId,
+            Role = role,
+            Content = content,
+            IsStreaming = isStreaming,
+            FinishReason = finishReason,
+            InputTokens = inputTokens,
+            OutputTokens = outputTokens,
+            CreatedAtUtc = DateTimeOffset.UtcNow
+        };
+
+        dbContext.Messages.Add(message);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return message;
+    }
+
+    public async Task UpdateMessageAsync(ConversationMessage message, string content, bool isStreaming, string? finishReason, int? inputTokens, int? outputTokens, CancellationToken cancellationToken)
+    {
+        message.Content = content;
+        message.IsStreaming = isStreaming;
+        message.FinishReason = finishReason;
+        message.InputTokens = inputTokens;
+        message.OutputTokens = outputTokens;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public static ConversationDto MapConversation(Conversation entity)
+        => new(
+            entity.Id,
+            entity.AgentDefinitionId,
+            entity.AgentDefinition?.Name ?? string.Empty,
+            entity.Title,
+            entity.CreatedAtUtc,
+            entity.UpdatedAtUtc,
+            entity.Messages.Count);
+
+    public static MessageDto MapMessage(ConversationMessage entity)
+        => new(
+            entity.Id,
+            entity.ConversationId,
+            entity.Role,
+            entity.Content,
+            entity.IsStreaming,
+            entity.FinishReason,
+            entity.InputTokens,
+            entity.OutputTokens,
+            entity.CreatedAtUtc);
+}

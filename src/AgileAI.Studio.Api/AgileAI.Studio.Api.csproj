@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.2" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AgileAI.Abstractions\AgileAI.Abstractions.csproj" />
+    <ProjectReference Include="..\AgileAI.Core\AgileAI.Core.csproj" />
+    <ProjectReference Include="..\AgileAI.Providers.OpenAI\AgileAI.Providers.OpenAI.csproj" />
+    <ProjectReference Include="..\AgileAI.Providers.OpenAICompatible\AgileAI.Providers.OpenAICompatible.csproj" />
+    <ProjectReference Include="..\AgileAI.Providers.AzureOpenAI\AgileAI.Providers.AzureOpenAI.csproj" />
+  </ItemGroup>
+
+</Project>

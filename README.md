@@ -46,7 +46,9 @@ AgileAI.slnx
 │   ├── AgileAI.Providers.AzureOpenAI/   # Azure OpenAI Chat Completions provider
 │   ├── AgileAI.Providers.OpenAIResponses/# OpenAI Responses API provider
 │   ├── AgileAI.Providers.Gemini/        # Gemini provider
-│   └── AgileAI.Providers.Claude/        # Claude provider
+│   ├── AgileAI.Providers.Claude/        # Claude provider
+│   └── AgileAI.Studio.Api/              # ASP.NET Core backend for AgileAI.Studio
+├── studio-web/                          # Vue 3 + Naive UI frontend for AgileAI.Studio
 ├── samples/
 │   ├── ConsoleChat/                     # Minimal OpenAI chat sample
 │   ├── OpenAICompatibleChat/            # Generic OpenAI-compatible sample
@@ -94,6 +96,67 @@ AgileAI.slnx
 - `AgileAI.Providers.OpenAIResponses` implements the OpenAI Responses API
 - `AgileAI.Providers.Gemini` implements Gemini content generation support
 - `AgileAI.Providers.Claude` implements Claude messages API support
+
+### 4. AgileAI.Studio
+
+`AgileAI.Studio` is the product layer built on top of the SDK in this repository.
+
+- `src/AgileAI.Studio.Api` provides:
+  - model and provider-connection management
+  - agent CRUD and conversation persistence
+  - streaming chat over server-sent events
+  - SQLite-backed local-first development setup
+  - a mock provider fallback for demo and e2e scenarios
+- `studio-web` provides:
+  - a modern desktop-first AI Studio interface
+  - model inventory, agent roster, and chat workspace pages
+  - Pinia-powered state management and Naive UI components
+  - Playwright e2e coverage and product screenshots
+
+## AgileAI.Studio Quick Start
+
+### Backend
+
+```bash
+dotnet run --project "src/AgileAI.Studio.Api/AgileAI.Studio.Api.csproj"
+```
+
+The API starts on `http://localhost:5117` in development and creates `studio.dev.db` automatically.
+
+### Frontend
+
+```bash
+cd studio-web
+npm install
+npm run dev
+```
+
+The Vite app reads `VITE_API_BASE_URL` when provided; otherwise it defaults to `http://localhost:5117/api`.
+
+### Studio Features In This Repo
+
+- create provider connections for `OpenAI`, `OpenAI Compatible`, and `Azure OpenAI`
+- add and validate models with a real minimal completion check
+- create, edit, pin, and delete agents
+- start conversations and stream replies in the chat workspace
+- run desktop e2e checks with Playwright
+
+### Screenshots
+
+Playwright-generated screenshots are stored under `studio-web/screenshots/` after running the e2e suite.
+
+- Overview: `studio-web/screenshots/studio-overview.png`
+- Models: `studio-web/screenshots/studio-models.png`
+- Agents: `studio-web/screenshots/studio-agents.png`
+- Chat: `studio-web/screenshots/studio-chat.png`
+
+### Studio Validation
+
+```bash
+cd studio-web
+npm run build
+npm run test:e2e
+```
 
 ## Quick Start
 
