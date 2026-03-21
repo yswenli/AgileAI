@@ -9,6 +9,7 @@ A lightweight .NET AI SDK for building chat applications with provider routing, 
 - Provider-based chat abstraction through `IChatClient` and `IChatModelProvider`
 - Supported providers:
   - OpenAI Chat Completions
+  - OpenAI-compatible Chat Completions
   - Azure OpenAI Chat Completions
   - OpenAI Responses API
   - Gemini
@@ -41,12 +42,14 @@ AgileAI.slnx
 │   ├── AgileAI.Abstractions/            # Core contracts and shared models
 │   ├── AgileAI.Core/                    # Chat client, runtime, sessions, registries, stores
 │   ├── AgileAI.Providers.OpenAI/        # OpenAI Chat Completions provider
+│   ├── AgileAI.Providers.OpenAICompatible/# Generic OpenAI-compatible provider
 │   ├── AgileAI.Providers.AzureOpenAI/   # Azure OpenAI Chat Completions provider
 │   ├── AgileAI.Providers.OpenAIResponses/# OpenAI Responses API provider
 │   ├── AgileAI.Providers.Gemini/        # Gemini provider
 │   └── AgileAI.Providers.Claude/        # Claude provider
 ├── samples/
 │   ├── ConsoleChat/                     # Minimal OpenAI chat sample
+│   ├── OpenAICompatibleChat/            # Generic OpenAI-compatible sample
 │   ├── ToolCallingSample/               # OpenAI tool calling sample
 │   ├── AzureOpenAIChat/                 # Azure OpenAI sample
 │   ├── GeminiChat/                      # Gemini sample
@@ -86,6 +89,7 @@ AgileAI.slnx
 ### 3. Providers
 
 - `AgileAI.Providers.OpenAI` implements OpenAI Chat Completions support
+- `AgileAI.Providers.OpenAICompatible` implements generic OpenAI-compatible chat completions support
 - `AgileAI.Providers.AzureOpenAI` implements Azure OpenAI deployment-based chat completions
 - `AgileAI.Providers.OpenAIResponses` implements the OpenAI Responses API
 - `AgileAI.Providers.Gemini` implements Gemini content generation support
@@ -280,6 +284,48 @@ Use model ids like `azure-openai:your-deployment-name`.
 - `MaxRetryCount`
 - `InitialRetryDelay`
 
+### OpenAI-Compatible Chat Completions
+
+Use this provider for third-party endpoints that expose an OpenAI-style `chat/completions` API.
+
+#### Dependency Injection
+
+```csharp
+services.AddOpenAICompatibleProvider(options =>
+{
+    options.ProviderName = "deepseek";
+    options.ApiKey = "your-api-key";
+    options.BaseUrl = "https://api.deepseek.com/v1/";
+});
+```
+
+Use model ids like `deepseek:deepseek-chat`.
+
+`OpenAICompatibleOptions` supports:
+
+- `ProviderName`
+- `ApiKey`
+- `BaseUrl`
+- `RelativePath`
+- `AuthMode`
+- `ApiKeyHeaderName`
+- `RequestTimeout`
+- `MaxRetryCount`
+- `InitialRetryDelay`
+
+For providers that require a custom API key header instead of `Authorization: Bearer`, configure it like this:
+
+```csharp
+services.AddOpenAICompatibleProvider(options =>
+{
+    options.ProviderName = "custom-gateway";
+    options.ApiKey = "your-api-key";
+    options.BaseUrl = "https://gateway.example.com/v1/";
+    options.AuthMode = OpenAICompatibleAuthMode.ApiKeyHeader;
+    options.ApiKeyHeaderName = "x-api-key";
+});
+```
+
 ### OpenAI Responses API
 
 #### Dependency Injection
@@ -413,6 +459,25 @@ dotnet run
 export OPENAI_API_KEY="your-api-key"
 cd samples/ToolCallingSample
 dotnet run
+```
+
+### OpenAI-Compatible Chat Completions
+
+```bash
+export OPENAI_COMPATIBLE_PROVIDER="deepseek"
+export OPENAI_COMPATIBLE_API_KEY="your-api-key"
+export OPENAI_COMPATIBLE_BASE_URL="https://api.deepseek.com/v1/"
+export OPENAI_COMPATIBLE_MODEL="deepseek-chat"
+export OPENAI_COMPATIBLE_AUTH_MODE="bearer"
+cd samples/OpenAICompatibleChat
+dotnet run
+```
+
+For gateways that require a custom API key header instead of `Authorization: Bearer`, also set:
+
+```bash
+export OPENAI_COMPATIBLE_AUTH_MODE="header"
+export OPENAI_COMPATIBLE_API_KEY_HEADER="x-api-key"
 ```
 
 ### Azure OpenAI

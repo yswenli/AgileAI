@@ -3,6 +3,7 @@
     <Project Path="src/AgileAI.Abstractions/AgileAI.Abstractions.csproj" />
     <Project Path="src/AgileAI.Core/AgileAI.Core.csproj" />
     <Project Path="src/AgileAI.Providers.OpenAI/AgileAI.Providers.OpenAI.csproj" />
+    <Project Path="src/AgileAI.Providers.OpenAICompatible/AgileAI.Providers.OpenAICompatible.csproj" />
     <Project Path="src/AgileAI.Providers.AzureOpenAI/AgileAI.Providers.AzureOpenAI.csproj" />
     <Project Path="src/AgileAI.Providers.OpenAIResponses/AgileAI.Providers.OpenAIResponses.csproj" />
     <Project Path="src/AgileAI.Providers.Gemini/AgileAI.Providers.Gemini.csproj" />
@@ -11,6 +12,7 @@
   <Folder Name="/samples/">
     <Project Path="samples/ConsoleChat/ConsoleChat.csproj" />
     <Project Path="samples/ToolCallingSample/ToolCallingSample.csproj" />
+    <Project Path="samples/OpenAICompatibleChat/OpenAICompatibleChat.csproj" />
     <Project Path="samples/AzureOpenAIChat/AzureOpenAIChat.csproj" />
     <Project Path="samples/GeminiChat/GeminiChat.csproj" />
     <Project Path="samples/ClaudeChat/ClaudeChat.csproj" />
