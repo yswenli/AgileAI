@@ -208,7 +208,7 @@ npm run test:e2e
 
 ## Quick Start
 
-### Filesystem Tools Extension
+### Build A File-Capable Agent In 5 Minutes
 
 You can add reusable filesystem tools to any AgileAI host without depending on Studio.
 
@@ -216,7 +216,7 @@ You can add reusable filesystem tools to any AgileAI host without depending on S
 using AgileAI.Abstractions;
 using AgileAI.Core;
 using AgileAI.DependencyInjection;
-using AgileAI.Extensions.FileSystem.DependencyInjection;
+using AgileAI.Extensions.FileSystem;
 using AgileAI.Providers.OpenAICompatible.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -230,18 +230,18 @@ services.AddOpenAICompatibleProvider(options =>
     options.BaseUrl = Environment.GetEnvironmentVariable("OPENAI_COMPATIBLE_BASE_URL")!;
     options.RelativePath = "chat/completions";
 });
-services.AddFileSystemTools(options =>
-{
-    options.RootPath = @"D:\workspace\MyProject";
-    options.MaxReadCharacters = 12000;
-});
 
 var serviceProvider = services.BuildServiceProvider();
 var chatClient = serviceProvider.GetRequiredService<IChatClient>();
-var registryFactory = serviceProvider.GetRequiredService<AgileAI.Extensions.FileSystem.FileSystemToolRegistryFactory>();
+var toolRegistry = new InMemoryToolRegistry()
+    .RegisterFileSystemTools(options =>
+    {
+        options.RootPath = @"D:\workspace\MyProject";
+        options.MaxReadCharacters = 12000;
+    });
 
 var session = new ChatSessionBuilder(chatClient, "openapi:gpt-5.4")
-    .WithToolRegistry(registryFactory.CreateDefaultRegistry())
+    .WithToolRegistry(toolRegistry)
     .Build();
 
 var response = await session.SendAsync("Use the filesystem tools to inspect README.md and summarize it.");
@@ -249,6 +249,11 @@ Console.WriteLine(response.Message?.TextContent);
 ```
 
 See `samples/FileSystemToolsSample/Program.cs` for a runnable example.
+
+If you prefer DI-based registration, `AgileAI.Extensions.FileSystem` also exposes:
+
+- `services.AddAgileAIFileSystemTools(...)`
+- `services.AddFileSystemTools(...)`
 
 ### Direct Usage
 

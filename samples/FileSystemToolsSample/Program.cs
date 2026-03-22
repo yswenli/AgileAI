@@ -1,7 +1,7 @@
 using AgileAI.Abstractions;
 using AgileAI.Core;
 using AgileAI.DependencyInjection;
-using AgileAI.Extensions.FileSystem.DependencyInjection;
+using AgileAI.Extensions.FileSystem;
 using AgileAI.Providers.OpenAICompatible.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -24,18 +24,18 @@ services.AddOpenAICompatibleProvider(options =>
     options.BaseUrl = baseUrl;
     options.RelativePath = "chat/completions";
 });
-services.AddFileSystemTools(options =>
-{
-    options.RootPath = rootPath;
-    options.MaxReadCharacters = 12000;
-});
 
 var serviceProvider = services.BuildServiceProvider();
 var chatClient = serviceProvider.GetRequiredService<IChatClient>();
-var toolRegistryFactory = serviceProvider.GetRequiredService<AgileAI.Extensions.FileSystem.FileSystemToolRegistryFactory>();
+var toolRegistry = new InMemoryToolRegistry()
+    .RegisterFileSystemTools(options =>
+    {
+        options.RootPath = rootPath;
+        options.MaxReadCharacters = 12000;
+    });
 
 var session = new ChatSessionBuilder(chatClient, $"{providerName}:{model}")
-    .WithToolRegistry(toolRegistryFactory.CreateDefaultRegistry())
+    .WithToolRegistry(toolRegistry)
     .Build();
 
 var prompt = "Use the filesystem tools to inspect the current root and summarize what files are available.";

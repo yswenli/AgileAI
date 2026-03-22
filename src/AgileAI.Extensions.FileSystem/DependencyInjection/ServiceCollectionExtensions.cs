@@ -4,6 +4,12 @@ namespace AgileAI.Extensions.FileSystem.DependencyInjection;
 
 public static class ServiceCollectionExtensions
 {
+    public static IServiceCollection AddAgileAIFileSystemTools(this IServiceCollection services, Action<FileSystemToolOptions> configure)
+        => services.AddFileSystemTools(configure);
+
+    public static IServiceCollection AddAgileAIFileSystemTools(this IServiceCollection services, FileSystemToolOptions options)
+        => services.AddFileSystemTools(options);
+
     public static IServiceCollection AddFileSystemTools(this IServiceCollection services, Action<FileSystemToolOptions> configure)
     {
         var options = new FileSystemToolOptions();

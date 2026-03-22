@@ -1,4 +1,5 @@
 using AgileAI.Abstractions;
+using AgileAI.Core;
 using AgileAI.Extensions.FileSystem;
 
 namespace AgileAI.Tests;
@@ -62,6 +63,21 @@ public class StudioWorkspaceToolsTests : IDisposable
 
         Assert.Contains("docs/", result.Content);
         Assert.Contains("README.md", result.Content);
+    }
+
+    [Fact]
+    public async Task RegisterFileSystemTools_ShouldAddDefaultToolsToRegistry()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_workspaceRoot, "README.md"), "Hello from registry");
+        var registry = new InMemoryToolRegistry()
+            .RegisterFileSystemTools(new FileSystemToolOptions { RootPath = _workspaceRoot });
+
+        var found = registry.TryGetTool("read_file", out var tool);
+
+        Assert.True(found);
+        Assert.NotNull(tool);
+        var result = await tool!.ExecuteAsync(CreateContext("read_file", "{\"path\":\"README.md\"}"));
+        Assert.Contains("Hello from registry", result.Content);
     }
 
     private static ToolExecutionContext CreateContext(string toolName, string arguments)
