@@ -1,8 +1,9 @@
 using AgileAI.Studio.Api.Contracts;
 using AgileAI.Studio.Api.Data;
+using AgileAI.Extensions.FileSystem;
+using AgileAI.Extensions.FileSystem.DependencyInjection;
 using AgileAI.Studio.Api.Infrastructure;
 using AgileAI.Studio.Api.Services;
-using AgileAI.Studio.Api.Tools;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -27,11 +28,11 @@ builder.Services.AddScoped<AgentService>();
 builder.Services.AddScoped<ConversationService>();
 builder.Services.AddScoped<AgentExecutionService>();
 builder.Services.AddSingleton<ProviderClientFactory>();
-builder.Services.AddSingleton<WorkspacePathGuard>();
-builder.Services.AddScoped<ListDirectoryTool>();
-builder.Services.AddScoped<ReadFileTool>();
-builder.Services.AddScoped<WriteFileTool>();
-builder.Services.AddScoped<StudioToolRegistryFactory>();
+builder.Services.AddFileSystemTools(new FileSystemToolOptions
+{
+    RootPath = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "..")),
+    MaxReadCharacters = 12000
+});
 
 var app = builder.Build();
 

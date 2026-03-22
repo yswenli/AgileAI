@@ -1,8 +1,8 @@
 using AgileAI.Abstractions;
 using AgileAI.Core;
+using AgileAI.Extensions.FileSystem;
 using AgileAI.Studio.Api.Contracts;
 using AgileAI.Studio.Api.Domain;
-using AgileAI.Studio.Api.Tools;
 
 namespace AgileAI.Studio.Api.Services;
 
@@ -10,7 +10,7 @@ public class AgentExecutionService(
     ConversationService conversationService,
     ModelCatalogService modelCatalogService,
     ProviderClientFactory providerClientFactory,
-    StudioToolRegistryFactory toolRegistryFactory)
+    FileSystemToolRegistryFactory toolRegistryFactory)
 {
     public async Task<ChatResultDto> SendMessageAsync(Guid conversationId, string content, CancellationToken cancellationToken)
     {

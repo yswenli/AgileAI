@@ -1,20 +1,20 @@
 using System.Text.Json;
 using AgileAI.Abstractions;
 
-namespace AgileAI.Studio.Api.Tools;
+namespace AgileAI.Extensions.FileSystem;
 
-public class WriteFileTool(WorkspacePathGuard pathGuard) : ITool
+public class WriteFileTool(FileSystemPathGuard pathGuard) : ITool
 {
     public string Name => "write_file";
 
-    public string Description => "Write a text file inside the AgileAI workspace.";
+    public string Description => "Write a text file inside the configured filesystem root.";
 
     public object ParametersSchema => new
     {
         type = "object",
         properties = new
         {
-            path = new { type = "string", description = "Workspace-relative file path to write." },
+            path = new { type = "string", description = "Root-relative file path to write." },
             content = new { type = "string", description = "Text content that should be written to the file." }
         },
         required = new[] { "path", "content" }

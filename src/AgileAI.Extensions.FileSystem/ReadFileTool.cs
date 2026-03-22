@@ -2,22 +2,20 @@ using System.Text;
 using System.Text.Json;
 using AgileAI.Abstractions;
 
-namespace AgileAI.Studio.Api.Tools;
+namespace AgileAI.Extensions.FileSystem;
 
-public class ReadFileTool(WorkspacePathGuard pathGuard) : ITool
+public class ReadFileTool(FileSystemPathGuard pathGuard, FileSystemToolOptions options) : ITool
 {
-    private const int MaxCharacters = 12000;
-
     public string Name => "read_file";
 
-    public string Description => "Read a text file inside the AgileAI workspace.";
+    public string Description => "Read a text file inside the configured filesystem root.";
 
     public object ParametersSchema => new
     {
         type = "object",
         properties = new
         {
-            path = new { type = "string", description = "Workspace-relative file path to read." }
+            path = new { type = "string", description = "Root-relative file path to read." }
         },
         required = new[] { "path" }
     };
@@ -37,12 +35,12 @@ public class ReadFileTool(WorkspacePathGuard pathGuard) : ITool
         var builder = new StringBuilder();
         builder.AppendLine($"Path: {pathGuard.ToRelativePath(resolvedPath)}");
         builder.AppendLine();
-        if (content.Length > MaxCharacters)
+        if (content.Length > options.MaxReadCharacters)
         {
-            builder.Append(content[..MaxCharacters]);
+            builder.Append(content[..options.MaxReadCharacters]);
             builder.AppendLine();
             builder.AppendLine();
-            builder.AppendLine("[Output truncated to 12000 characters]");
+            builder.AppendLine($"[Output truncated to {options.MaxReadCharacters} characters]");
         }
         else
         {

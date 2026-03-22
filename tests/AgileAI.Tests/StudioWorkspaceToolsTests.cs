@@ -1,22 +1,23 @@
 using AgileAI.Abstractions;
-using AgileAI.Studio.Api.Tools;
-using Microsoft.Extensions.Hosting;
+using AgileAI.Extensions.FileSystem;
 
 namespace AgileAI.Tests;
 
 public class StudioWorkspaceToolsTests : IDisposable
 {
     private readonly string _workspaceRoot;
-    private readonly WorkspacePathGuard _pathGuard;
+    private readonly FileSystemPathGuard _pathGuard;
+    private readonly FileSystemToolOptions _options;
 
     public StudioWorkspaceToolsTests()
     {
         _workspaceRoot = Path.Combine(Path.GetTempPath(), $"agileai-studio-tools-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(_workspaceRoot, "src", "AgileAI.Studio.Api"));
-        _pathGuard = new WorkspacePathGuard(new FakeHostEnvironment
+        Directory.CreateDirectory(_workspaceRoot);
+        _options = new FileSystemToolOptions
         {
-            ContentRootPath = Path.Combine(_workspaceRoot, "src", "AgileAI.Studio.Api")
-        });
+            RootPath = _workspaceRoot
+        };
+        _pathGuard = new FileSystemPathGuard(_options);
     }
 
     [Fact]
@@ -30,7 +31,7 @@ public class StudioWorkspaceToolsTests : IDisposable
     {
         var filePath = Path.Combine(_workspaceRoot, "README.md");
         await File.WriteAllTextAsync(filePath, "Hello from workspace");
-        var tool = new ReadFileTool(_pathGuard);
+        var tool = new ReadFileTool(_pathGuard, _options);
 
         var result = await tool.ExecuteAsync(CreateContext("read_file", "{\"path\":\"README.md\"}"));
 
@@ -82,11 +83,4 @@ public class StudioWorkspaceToolsTests : IDisposable
         }
     }
 
-    private sealed class FakeHostEnvironment : IHostEnvironment
-    {
-        public string EnvironmentName { get; set; } = "Test";
-        public string ApplicationName { get; set; } = "AgileAI.Tests";
-        public string ContentRootPath { get; set; } = string.Empty;
-        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } = null!;
-    }
 }

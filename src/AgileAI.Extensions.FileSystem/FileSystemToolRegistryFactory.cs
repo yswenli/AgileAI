@@ -1,9 +1,9 @@
 using AgileAI.Abstractions;
 using AgileAI.Core;
 
-namespace AgileAI.Studio.Api.Tools;
+namespace AgileAI.Extensions.FileSystem;
 
-public class StudioToolRegistryFactory(
+public class FileSystemToolRegistryFactory(
     ListDirectoryTool listDirectoryTool,
     ReadFileTool readFileTool,
     WriteFileTool writeFileTool)

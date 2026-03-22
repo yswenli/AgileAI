@@ -1,20 +1,20 @@
 using System.Text.Json;
 using AgileAI.Abstractions;
 
-namespace AgileAI.Studio.Api.Tools;
+namespace AgileAI.Extensions.FileSystem;
 
-public class ListDirectoryTool(WorkspacePathGuard pathGuard) : ITool
+public class ListDirectoryTool(FileSystemPathGuard pathGuard) : ITool
 {
     public string Name => "list_directory";
 
-    public string Description => "List files and directories within the AgileAI workspace.";
+    public string Description => "List files and directories inside the configured filesystem root.";
 
     public object ParametersSchema => new
     {
         type = "object",
         properties = new
         {
-            path = new { type = "string", description = "Workspace-relative directory path. Use . for the repository root." }
+            path = new { type = "string", description = "Root-relative directory path. Use . for the configured root." }
         },
         required = new[] { "path" }
     };
