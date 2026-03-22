@@ -126,24 +126,26 @@ public class AgentExecutionService(
     private ChatSession CreateSession(Conversation conversation, AgentDefinition agent, string runtimeModelId, IChatClient chatClient)
     {
         var toolRegistry = toolRegistryFactory.CreateDefaultRegistry();
-        var session = new ChatSession(chatClient, runtimeModelId, toolRegistry);
+        var history = new List<ChatMessage>
+        {
+            ChatMessage.System(BuildSystemPrompt(agent.SystemPrompt))
+        };
 
-        session.AddMessage(ChatMessage.System(BuildSystemPrompt(agent.SystemPrompt)));
         foreach (var message in conversation.Messages.OrderBy(x => x.CreatedAtUtc))
         {
             switch (message.Role)
             {
                 case MessageRole.System:
-                    session.AddMessage(ChatMessage.System(message.Content));
+                    history.Add(ChatMessage.System(message.Content));
                     break;
                 case MessageRole.User:
-                    session.AddMessage(ChatMessage.User(message.Content));
+                    history.Add(ChatMessage.User(message.Content));
                     break;
                 case MessageRole.Assistant:
-                    session.AddMessage(ChatMessage.Assistant(message.Content));
+                    history.Add(ChatMessage.Assistant(message.Content));
                     break;
                 case MessageRole.Tool:
-                    session.AddMessage(new ChatMessage
+                    history.Add(new ChatMessage
                     {
                         Role = ChatRole.Tool,
                         ToolCallId = message.Id.ToString(),
@@ -153,7 +155,10 @@ public class AgentExecutionService(
             }
         }
 
-        return session;
+        return new ChatSessionBuilder(chatClient, runtimeModelId)
+            .WithToolRegistry(toolRegistry)
+            .WithHistory(history)
+            .Build();
     }
 
     private static string BuildSystemPrompt(string basePrompt)
