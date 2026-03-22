@@ -41,6 +41,14 @@ test('create agent and stream chat reply', async ({ page }) => {
   await page.screenshot({ path: 'screenshots/studio-chat.png', fullPage: true })
 })
 
+test('real GPT-5.4 chat screenshot', async ({ page }) => {
+  await page.goto('/chat')
+  await page.locator('button.conversation-link', { hasText: 'GPT-5.4 live verification' }).first().click()
+  await expect(page.getByText('GPT-5.4 live verification').first()).toBeVisible()
+  await page.waitForTimeout(800)
+  await page.screenshot({ path: 'screenshots/studio-chat-gpt54.png', fullPage: true })
+})
+
 test('model validation, agent edit, and conversation switching flow', async ({ page }) => {
   await page.goto('/models')
   await page.getByRole('button', { name: 'Test' }).first().click()

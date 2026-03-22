@@ -184,6 +184,10 @@ Playwright-generated screenshots are stored under `studio-web/screenshots/` afte
 
 ![AgileAI Studio chat page](studio-web/screenshots/studio-chat.png)
 
+#### Real GPT-5.4 Provider Chat
+
+![AgileAI Studio real GPT-5.4 chat](studio-web/screenshots/studio-chat-gpt54.png)
+
 ### Studio Validation
 
 ```bash
