@@ -181,9 +181,15 @@ select {
 .agent-card p,
 .inline-card p,
 .composer-actions p,
-.empty-state {
+.empty-state,
+.form-hint {
   color: var(--text-soft);
   line-height: 1.6;
+}
+
+.form-hint {
+  margin: -4px 0 12px;
+  font-size: 13px;
 }
 
 .nav-list {

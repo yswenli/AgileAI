@@ -151,6 +151,10 @@ async function removeAgent(id: string) {
         </template>
         <div class="tip-stack">
           <article class="inline-card">
+            <strong>Workspace tools included</strong>
+            <p>Studio agents now include `list_directory`, `read_file`, and `write_file` for files inside this repository workspace.</p>
+          </article>
+          <article class="inline-card">
             <strong>Identity first</strong>
             <p>Give the agent a clear role, tone, and boundary so outputs stay consistent.</p>
           </article>
@@ -174,6 +178,7 @@ async function removeAgent(id: string) {
           <n-select v-model:value="form.studioModelId" :options="modelOptions" />
         </n-form-item>
         <n-form-item label="System prompt"><n-input v-model:value="form.systemPrompt" type="textarea" :autosize="{ minRows: 6, maxRows: 12 }" data-testid="agent-prompt-input" /></n-form-item>
+        <p class="form-hint">Default workspace tools are always available: `list_directory`, `read_file`, and `write_file`.</p>
         <div class="form-grid">
           <n-form-item label="Temperature"><n-input-number v-model:value="form.temperature" :min="0" :max="2" :step="0.1" /></n-form-item>
           <n-form-item label="Max tokens"><n-input-number v-model:value="form.maxTokens" :min="256" :max="8192" :step="128" /></n-form-item>

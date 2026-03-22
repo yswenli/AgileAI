@@ -146,6 +146,7 @@ async function submitPrompt() {
           <div class="composer-actions">
             <p>
               Agent memory is persisted per conversation.
+              <span> Workspace file tools are available for repository files.</span>
               <span v-if="store.isStreaming"> Streaming response in progress...</span>
               <span v-if="store.streamError"> {{ store.streamError }}</span>
             </p>

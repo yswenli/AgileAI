@@ -49,6 +49,17 @@ test('real GPT-5.4 chat screenshot', async ({ page }) => {
   await page.screenshot({ path: 'screenshots/studio-chat-gpt54.png', fullPage: true })
 })
 
+test('workspace file tools read README', async ({ page }) => {
+  await page.goto('/chat')
+  const agentSelect = page.getByTestId('agent-select')
+  const studioConcierge = await agentSelect.locator('option').filter({ hasText: 'Studio Concierge' }).first().getAttribute('value')
+  await agentSelect.selectOption(studioConcierge ?? '')
+  await page.getByTestId('new-conversation').click()
+  await page.getByTestId('chat-input').locator('textarea').fill('Use the workspace tools to read README.md and show the file path you used.')
+  await page.getByTestId('send-message').click()
+  await expect(page.getByTestId('chat-transcript')).toContainText('README.md', { timeout: 15000 })
+})
+
 test('model validation, agent edit, and conversation switching flow', async ({ page }) => {
   await page.goto('/models')
   await page.getByRole('button', { name: 'Test' }).first().click()

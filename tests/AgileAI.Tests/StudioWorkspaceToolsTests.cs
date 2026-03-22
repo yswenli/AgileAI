@@ -1,0 +1,92 @@
+using AgileAI.Abstractions;
+using AgileAI.Studio.Api.Tools;
+using Microsoft.Extensions.Hosting;
+
+namespace AgileAI.Tests;
+
+public class StudioWorkspaceToolsTests : IDisposable
+{
+    private readonly string _workspaceRoot;
+    private readonly WorkspacePathGuard _pathGuard;
+
+    public StudioWorkspaceToolsTests()
+    {
+        _workspaceRoot = Path.Combine(Path.GetTempPath(), $"agileai-studio-tools-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(_workspaceRoot, "src", "AgileAI.Studio.Api"));
+        _pathGuard = new WorkspacePathGuard(new FakeHostEnvironment
+        {
+            ContentRootPath = Path.Combine(_workspaceRoot, "src", "AgileAI.Studio.Api")
+        });
+    }
+
+    [Fact]
+    public void ResolvePath_ShouldRejectPathOutsideWorkspace()
+    {
+        Assert.Throws<InvalidOperationException>(() => _pathGuard.ResolvePath("../outside.txt"));
+    }
+
+    [Fact]
+    public async Task ReadFileTool_ShouldReturnFileContents()
+    {
+        var filePath = Path.Combine(_workspaceRoot, "README.md");
+        await File.WriteAllTextAsync(filePath, "Hello from workspace");
+        var tool = new ReadFileTool(_pathGuard);
+
+        var result = await tool.ExecuteAsync(CreateContext("read_file", "{\"path\":\"README.md\"}"));
+
+        Assert.Contains("Path: README.md", result.Content);
+        Assert.Contains("Hello from workspace", result.Content);
+    }
+
+    [Fact]
+    public async Task WriteFileTool_ShouldCreateWorkspaceFile()
+    {
+        var tool = new WriteFileTool(_pathGuard);
+
+        var result = await tool.ExecuteAsync(CreateContext("write_file", "{\"path\":\"notes/output.txt\",\"content\":\"written by test\"}"));
+
+        Assert.True(File.Exists(Path.Combine(_workspaceRoot, "notes", "output.txt")));
+        Assert.Contains("notes/output.txt", result.Content);
+        Assert.Equal("written by test", await File.ReadAllTextAsync(Path.Combine(_workspaceRoot, "notes", "output.txt")));
+    }
+
+    [Fact]
+    public async Task ListDirectoryTool_ShouldReturnWorkspaceEntries()
+    {
+        Directory.CreateDirectory(Path.Combine(_workspaceRoot, "docs"));
+        await File.WriteAllTextAsync(Path.Combine(_workspaceRoot, "README.md"), "hi");
+        var tool = new ListDirectoryTool(_pathGuard);
+
+        var result = await tool.ExecuteAsync(CreateContext("list_directory", "{\"path\":\".\"}"));
+
+        Assert.Contains("docs/", result.Content);
+        Assert.Contains("README.md", result.Content);
+    }
+
+    private static ToolExecutionContext CreateContext(string toolName, string arguments)
+        => new()
+        {
+            ToolCall = new ToolCall
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Name = toolName,
+                Arguments = arguments
+            }
+        };
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_workspaceRoot))
+        {
+            Directory.Delete(_workspaceRoot, recursive: true);
+        }
+    }
+
+    private sealed class FakeHostEnvironment : IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = "Test";
+        public string ApplicationName { get; set; } = "AgileAI.Tests";
+        public string ContentRootPath { get; set; } = string.Empty;
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } = null!;
+    }
+}
