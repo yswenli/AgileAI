@@ -41,6 +41,7 @@ AgileAI.slnx
 ├── src/
 │   ├── AgileAI.Abstractions/            # Core contracts and shared models
 │   ├── AgileAI.Core/                    # Chat client, runtime, sessions, registries, stores
+│   ├── AgileAI.Extensions.FileSystem/   # Reusable root-scoped filesystem tools
 │   ├── AgileAI.Providers.OpenAI/        # OpenAI Chat Completions provider
 │   ├── AgileAI.Providers.OpenAICompatible/# Generic OpenAI-compatible provider
 │   ├── AgileAI.Providers.AzureOpenAI/   # Azure OpenAI Chat Completions provider
@@ -51,6 +52,7 @@ AgileAI.slnx
 ├── studio-web/                          # Vue 3 + Naive UI frontend for AgileAI.Studio
 ├── samples/
 │   ├── ConsoleChat/                     # Minimal OpenAI chat sample
+│   ├── FileSystemToolsSample/           # Filesystem tools sample with ChatSessionBuilder
 │   ├── OpenAICompatibleChat/            # Generic OpenAI-compatible sample
 │   ├── ToolCallingSample/               # OpenAI tool calling sample
 │   ├── AzureOpenAIChat/                 # Azure OpenAI sample
@@ -97,7 +99,15 @@ AgileAI.slnx
 - `AgileAI.Providers.Gemini` implements Gemini content generation support
 - `AgileAI.Providers.Claude` implements Claude messages API support
 
-### 4. AgileAI.Studio
+### 4. Extensions
+
+- `AgileAI.Extensions.FileSystem` provides reusable root-scoped file tools:
+  - `list_directory`
+  - `read_file`
+  - `write_file`
+  - DI registration with `AddFileSystemTools(...)`
+
+### 5. AgileAI.Studio
 
 `AgileAI.Studio` is the product layer built on top of the SDK in this repository.
 
@@ -197,6 +207,48 @@ npm run test:e2e
 ```
 
 ## Quick Start
+
+### Filesystem Tools Extension
+
+You can add reusable filesystem tools to any AgileAI host without depending on Studio.
+
+```csharp
+using AgileAI.Abstractions;
+using AgileAI.Core;
+using AgileAI.DependencyInjection;
+using AgileAI.Extensions.FileSystem.DependencyInjection;
+using AgileAI.Providers.OpenAICompatible.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
+
+var services = new ServiceCollection();
+
+services.AddAgileAI();
+services.AddOpenAICompatibleProvider(options =>
+{
+    options.ProviderName = "openapi";
+    options.ApiKey = Environment.GetEnvironmentVariable("OPENAI_COMPATIBLE_API_KEY")!;
+    options.BaseUrl = Environment.GetEnvironmentVariable("OPENAI_COMPATIBLE_BASE_URL")!;
+    options.RelativePath = "chat/completions";
+});
+services.AddFileSystemTools(options =>
+{
+    options.RootPath = @"D:\workspace\MyProject";
+    options.MaxReadCharacters = 12000;
+});
+
+var serviceProvider = services.BuildServiceProvider();
+var chatClient = serviceProvider.GetRequiredService<IChatClient>();
+var registryFactory = serviceProvider.GetRequiredService<AgileAI.Extensions.FileSystem.FileSystemToolRegistryFactory>();
+
+var session = new ChatSessionBuilder(chatClient, "openapi:gpt-5.4")
+    .WithToolRegistry(registryFactory.CreateDefaultRegistry())
+    .Build();
+
+var response = await session.SendAsync("Use the filesystem tools to inspect README.md and summarize it.");
+Console.WriteLine(response.Message?.TextContent);
+```
+
+See `samples/FileSystemToolsSample/Program.cs` for a runnable example.
 
 ### Direct Usage
 

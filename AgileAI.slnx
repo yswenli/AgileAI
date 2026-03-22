@@ -16,6 +16,7 @@
     <Project Path="samples/ToolCallingSample/ToolCallingSample.csproj" />
     <Project Path="samples/OpenAICompatibleChat/OpenAICompatibleChat.csproj" />
     <Project Path="samples/AzureOpenAIChat/AzureOpenAIChat.csproj" />
+    <Project Path="samples/FileSystemToolsSample/FileSystemToolsSample.csproj" />
     <Project Path="samples/GeminiChat/GeminiChat.csproj" />
     <Project Path="samples/ClaudeChat/ClaudeChat.csproj" />
     <Project Path="samples/OpenAIResponsesChat/OpenAIResponsesChat.csproj" />
