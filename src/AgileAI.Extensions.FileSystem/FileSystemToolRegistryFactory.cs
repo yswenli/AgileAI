@@ -8,12 +8,13 @@ public class FileSystemToolRegistryFactory(
     SearchFilesTool searchFilesTool,
     ReadFileTool readFileTool,
     ReadFilesBatchTool readFilesBatchTool,
-    WriteFileTool writeFileTool)
+    WriteFileTool writeFileTool,
+    CreateDirectoryTool createDirectoryTool)
 {
     public IToolRegistry CreateDefaultRegistry()
     {
         var registry = new InMemoryToolRegistry();
-        registry.Register([listDirectoryTool, searchFilesTool, readFileTool, readFilesBatchTool, writeFileTool]);
+        registry.Register([listDirectoryTool, searchFilesTool, readFileTool, readFilesBatchTool, writeFileTool, createDirectoryTool]);
         return registry;
     }
 }

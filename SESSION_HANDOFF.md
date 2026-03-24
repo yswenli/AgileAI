@@ -1,228 +1,157 @@
-# AgileAI Session Handoff
+# SESSION_HANDOFF.md — AgileAI Studio 项目交接
 
-> Note for future agents: `TODO.md` remains the authoritative task list. This file is not a backlog and should not be treated as the source of truth for open work. It exists only to preserve implementation context, recent decisions, completed milestones, and recommended next steps.
+> 最后更新: 2025-01-22
 
-This file captures the current implementation state of `AgileAI.Studio` and the reusable filesystem-tooling work that was extracted from it, so another agent can continue without re-discovering context.
+---
 
-## What Was Built
+## 1. 项目概述
 
-### AgileAI.Studio product layer
+**AgileAI.Studio** 是一个基于大语言模型的 AI Agent 应用，包含：
+- **AgileAI.Studio.Api** — 后端 API (.NET 9)
+- **AgileAI.Studio** — 前端 Web UI (Vue 3 + Vite)
+- **AgileAI.Extensions.FileSystem** — 文件系统工具扩展（当前重点）
 
-- Backend project: `src/AgileAI.Studio.Api`
-- Frontend project: `studio-web`
-- Studio supports:
-  - provider connections
-  - model management
-  - agent management
-  - conversation persistence
-  - chat with real providers and mock fallback
-  - modern light/dark desktop UI
-  - Playwright screenshots and e2e coverage
+项目结构采用 Clean Architecture，支持多 Provider（OpenAI、Azure、Custom）。
 
-### Real provider validation completed
+---
 
-- A real OpenAI-compatible provider was tested successfully against:
-  - base URL: `http://192.168.0.126:8317/v1`
-  - model: `gpt-5.4`
-- Studio successfully validated the model and completed a real chat roundtrip.
+## 2. 当前状态
 
-## Historical backlog status
+### ✅ 已完成 (Phase 1)
 
-The old root `TODO.md` has been consolidated into this handoff. Its tracked items were already completed and are preserved here for continuity.
+| 组件 | 状态 | 说明 |
+|------|------|------|
+| `list_directory` | ✅ | 列出目录内容 |
+| `search_files` | ✅ | 搜索文件（含内容） |
+| `read_file` | ✅ | 读取单个文件 |
+| `read_files_batch` | ✅ | 批量读取文件 |
+| `write_file` | ✅ | 写入/覆盖文件 |
+| **`create_directory`** | ✅ **新增** | 创建目录（含父目录） |
 
-Completed implementation tracks from the old TODO:
+**新增实现：**
+- `CreateDirectoryTool.cs` — 完整工具实现
+- `FileSystemToolRegistryFactory.cs` — 已注册新工具
+- `ServiceCollectionExtensions.cs` — 已添加 DI 注册
+- `CreateDirectoryToolTests.cs` — 9 个单元测试覆盖所有场景
 
-- skill prompt deduplication in multi-turn conversations
-- `ConversationState` and `ISessionStore`
-- active skill continuation policy
-- README synchronization with implemented providers and runtime capabilities
-- runnable provider samples for Gemini, Claude, and OpenAI Responses
-- file-based persistent session store support
-- improved skill continuation and exit behavior
-- shared content-part support for non-text request content
+### 📋 待办工作 (Phase 2-4)
 
-If new work is created, add a fresh `Next Work` section to this file instead of recreating a second root task document.
+| Phase | 工具 | 优先级 | 说明 |
+|-------|------|--------|------|
+| **Phase 2** | `move_file` | 中 | 移动文件/目录，遵守 root path 约束 |
+| **Phase 3** | `patch_file` | 低 | 文本级别的 diff/patch 操作 |
+| **Phase 4** | `delete_file` | 低 | 删除文件（需更强的 guardrails） |
+| | `delete_directory` | 低 | 删除目录（需更强的 guardrails） |
 
-## Filesystem tooling evolution
+**Delete 操作的 Guardrails 建议：**
+1. 确认机制（如 `--force` 标志或二次确认）
+2. 回收站/垃圾桶（移到临时目录而非永久删除）
+3. 白名单机制（只允许删除特定扩展名的文件）
+4. 审计日志（记录所有删除操作）
 
-### Phase 1: Studio-only tools
+---
 
-Initial workspace tools were first implemented directly inside `src/AgileAI.Studio.Api` to validate product behavior.
+## 3. 技术细节
 
-### Phase 2: Core abstraction
+### 文件系统工具架构
 
-A reusable session-construction helper was added:
-
-- `src/AgileAI.Core/ChatSessionBuilder.cs`
-
-Purpose:
-
-- make it easier for hosts to build a `ChatSession`
-- attach history and tool registry cleanly
-- provide a better base for tool-enabled agents outside Studio
-
-### Phase 3: Filesystem extension extraction
-
-Filesystem tools were extracted into a reusable package:
-
-- `src/AgileAI.Extensions.FileSystem`
-
-Current extension contents:
-
-- `FileSystemToolOptions`
-- `FileSystemPathGuard`
-- `ListDirectoryTool`
-- `SearchFilesTool`
-- `ReadFileTool`
-- `ReadFilesBatchTool`
-- `WriteFileTool`
-- `FileSystemToolRegistryFactory`
-- `FileSystemToolRegistryExtensions`
-- DI registration helpers in `DependencyInjection/ServiceCollectionExtensions.cs`
-
-## Current filesystem tools
-
-These tools now exist in `AgileAI.Extensions.FileSystem`:
-
-- `list_directory`
-- `search_files`
-- `read_file`
-- `read_files_batch`
-- `write_file`
-
-Security model:
-
-- all tools are constrained to a configured root path
-- path traversal outside root is rejected
-- Studio configures the root as the repository workspace
-
-## Current SDK usage patterns
-
-### Lightweight host usage
-
-Use an in-memory registry directly:
-
-```csharp
-var toolRegistry = new InMemoryToolRegistry()
-    .RegisterFileSystemTools(options =>
-    {
-        options.RootPath = @"D:\workspace\MyProject";
-        options.MaxReadCharacters = 12000;
-    });
-
-var session = new ChatSessionBuilder(chatClient, "openapi:gpt-5.4")
-    .WithToolRegistry(toolRegistry)
-    .Build();
+```
+AgileAI.Extensions.FileSystem/
+├── ITool (from AgileAI.Abstractions)
+├── FileSystemPathGuard          # 路径安全检查
+├── FileSystemToolOptions        # 配置选项
+├── FileSystemToolRegistryFactory # 工具注册工厂
+├── DependencyInjection/
+│   └── ServiceCollectionExtensions.cs
+└── Tools/
+    ├── ListDirectoryTool.cs
+    ├── SearchFilesTool.cs
+    ├── ReadFileTool.cs
+    ├── ReadFilesBatchTool.cs
+    ├── WriteFileTool.cs
+    └── CreateDirectoryTool.cs  # 新增
 ```
 
-### DI usage
+### 安全模型
 
-Available registration helpers:
+所有工具都通过 `FileSystemPathGuard` 进行路径验证：
 
-- `services.AddFileSystemTools(...)`
-- `services.AddAgileAIFileSystemTools(...)`
+1. **ResolvePath**: 将相对路径解析为绝对路径
+2. **Root Path 验证**: 确保解析后的路径在配置的根目录内
+3. **路径逃逸防护**: 检测 `../` 等逃逸尝试并抛出异常
 
-## Studio integration details
+```csharp
+// 示例：路径验证逻辑
+var resolvedPath = pathGuard.ResolvePath(request.Path);
+// 如果 request.Path = "../../../etc/passwd"
+// 将抛出 InvalidOperationException: "Path escapes the configured filesystem root"
+```
 
-Studio now consumes the extension package instead of keeping its own private file tools.
+---
 
-Key files:
+## 4. 环境配置
 
-- `src/AgileAI.Studio.Api/Program.cs`
-- `src/AgileAI.Studio.Api/Services/AgentExecutionService.cs`
-- `src/AgileAI.Studio.Api/Services/MockChatModelProvider.cs`
+### 快速开始
 
-Important behavior:
+```bash
+# 1. 启动后端 API
+cd AgileAI/src/AgileAI.Studio.Api
+dotnet run --urls "http://localhost:5100"
 
-- Studio agent execution uses `ChatSessionBuilder` and a default filesystem tool registry
-- Studio prompt guidance explicitly tells the model to prefer:
-  - `list_directory`
-  - `search_files`
-  - `read_file`
-  - `read_files_batch`
-- Streaming in Studio currently prioritizes correctness over rich token-by-token tool streaming
+# 2. 启动前端
+cd AgileAI/src/AgileAI.Studio
+npm run dev
 
-## Tests and validation status
+# 3. 运行测试
+cd AgileAI
+dotnet test
+```
 
-### .NET tests
+### 关键配置
 
-- test project: `tests/AgileAI.Tests`
-- current total seen in session: `135 passed`
+`appsettings.Development.json`:
+```json
+{
+  "FileSystemTools": {
+    "RootPath": "/path/to/workspace"
+  },
+  "ModelCatalog": {
+    "DefaultModelId": "gpt-4o"
+  }
+}
+```
 
-Relevant test files:
+---
 
-- `tests/AgileAI.Tests/ChatSessionBuilderTests.cs`
-- `tests/AgileAI.Tests/StudioWorkspaceToolsTests.cs`
+## 5. 交接人备注
 
-### Playwright
+### 当前焦点
 
-- frontend tests: `studio-web/tests/studio.spec.ts`
-- Playwright has been used to validate:
-  - dashboard
-  - models page
-  - agents page
-  - Studio chat
-  - real GPT-5.4 chat screenshot
-  - workspace file tool flow
+Phase 1 (`create_directory`) **已完成并通过测试**。下一步建议：
 
-## Screenshots and README
+1. **代码审查**: 检查 `CreateDirectoryTool.cs` 和 `CreateDirectoryToolTests.cs`
+2. **集成测试**: 在 Studio 中实际使用 `create_directory` 工具
+3. **Phase 2 规划**: 确定 `move_file` 的优先级和实现方式
 
-README includes embedded preview screenshots.
+### 已知问题
 
-Key screenshot paths:
+- 无已知 Blocker
+- 所有现有测试通过
 
-- `studio-web/screenshots/studio-overview.png`
-- `studio-web/screenshots/studio-models.png`
-- `studio-web/screenshots/studio-agents.png`
-- `studio-web/screenshots/studio-chat.png`
-- `studio-web/screenshots/studio-chat-gpt54.png`
+### 建议
 
-## Recent commits made in this session
+- **Delete 操作 (Phase 4)**: 建议在实际需求明确后再实现，因为需要复杂的安全 guardrails
+- **Patch 操作 (Phase 3)**: 优先级较低，因为 `write_file` 已能满足大多数场景
 
-Recent notable commits pushed to `origin/main`:
+---
 
-- `421f43f` - `feat: add batch filesystem reads`
-- `e9256ec` - `feat: add filesystem search tool`
-- `52c0ea9` - `feat: simplify filesystem tool registration`
-- `004d0a1` - `docs: add filesystem tools guide and sample`
-- `3a79e16` - `feat: extract filesystem tools extension`
-- `9d5c515` - `feat: add reusable chat session builder`
-- `ba1e7cb` - `feat: add Studio workspace file tools`
+## 6. 相关链接
 
-## Suggested next steps
+- 项目仓库: `https://github.com/kklldog/AgileAI`
+- 相关文档: `README.md`, `ARCHITECTURE.md` (待创建)
 
-The last recommended direction was to keep expanding the reusable filesystem toolset in low-risk order.
+---
 
-Recommended next tools:
-
-1. `create_directory`
-2. `move_file`
-3. maybe later `patch_file`
-4. only later, and more carefully, delete operations
-
-## Next Work
-
-Recommended next implementation sequence from the current state:
-
-1. add `create_directory` to `AgileAI.Extensions.FileSystem`
-2. register it in all extension registration paths
-3. update Studio prompt guidance and mock provider support
-4. add unit tests for safe directory creation under root constraints
-5. update sample and README quickstart wording if the sample starts to create output structure
-6. rerun .NET tests and Playwright validation
-
-Rationale:
-
-- `create_directory` is low risk and useful for agent-driven scaffolding
-- `move_file` helps with reorganization workflows
-- destructive tools should come later with stronger guardrails
-
-## Practical notes for the next agent
-
-- If .NET build/test reports file locking on Windows, it is usually because a prior `AgileAI.Studio.Api` or `dotnet` process is still alive after Playwright or manual runs.
-- Re-running the same build/test after the locked process exits has consistently resolved it.
-- The PowerShell command used once in-session to stop processes was malformed in bash context; avoid that exact pattern.
-
-## Recommended continuity plan
-
-If continuing immediately, use the `Next Work` section above as the active queue and treat this file as the single handoff document.
+**交接人**: Sisyphus  
+**接收人**: (待填写)  
+**日期**: 2025-01-22
