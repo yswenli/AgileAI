@@ -1,7 +1,178 @@
+<template>
+  <section class="page">
+    <div class="page-header">
+      <p class="eyebrow">Model catalog</p>
+      <n-space>
+        <n-button secondary type="primary" @click="openProviderModal()">Add Provider</n-button>
+        <n-button type="primary" @click="openModelModal()">New model</n-button>
+      </n-space>
+    </div>
+
+    <div class="grid-two">
+      <n-card class="glass-card" embedded>
+        <template #header>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Provider connections</p>
+              <h3>Credentials and endpoints</h3>
+            </div>
+          </div>
+        </template>
+        <div v-if="store.providerConnections.length === 0" class="empty-state">
+          No providers configured yet.
+        </div>
+        <div v-else class="provider-grid">
+          <n-card
+            v-for="item in store.providerConnections"
+            :key="item.id"
+            class="provider-card"
+            embedded
+          >
+            <template #header>
+              <n-space align="center" justify="space-between">
+                <n-space align="center" :size="8">
+                  <n-icon size="24" :depth="2"><server-outline /></n-icon>
+                  <n-text strong>{{ item.name }}</n-text>
+                  <n-tag :type="getProviderTypeColor(item.providerType)" size="small" round>{{ item.providerType }}</n-tag>
+                </n-space>
+                <n-space :size="4">
+                  <n-button circle quaternary size="small" @click="openProviderModal(item)">
+                    <template #icon><n-icon><create-outline /></n-icon></template>
+                  </n-button>
+                  <n-popconfirm @positive-click="handleDeleteProvider(item.id)">
+                    <template #trigger>
+                      <n-button circle quaternary size="small" type="error">
+                        <template #icon><n-icon><trash-outline /></n-icon></template>
+                      </n-button>
+                    </template>
+                    Delete this provider connection?
+                  </n-popconfirm>
+                </n-space>
+              </n-space>
+            </template>
+            <n-descriptions :column="1" size="small" label-placement="left">
+              <n-descriptions-item label="Base URL">
+                <n-ellipsis style="max-width: 200px;">{{ item.baseUrl || 'N/A' }}</n-ellipsis>
+              </n-descriptions-item>
+            </n-descriptions>
+            <template #footer>
+              <n-divider style="margin: 8px 0;" />
+              <n-space vertical :size="8">
+                <n-text strong style="font-size: 13px;">Models ({{ getModelsForProvider(item.id).length }})</n-text>
+                <n-space :size="4" wrap>
+                  <n-tag
+                    v-for="model in getModelsForProvider(item.id)"
+                    :key="model.id"
+                    size="small"
+                    :bordered="false"
+                    :type="model.isEnabled ? 'success' : 'default'"
+                  >
+                    {{ model.displayName }}
+                  </n-tag>
+                </n-space>
+              </n-space>
+            </template>
+          </n-card>
+        </div>
+      </n-card>
+
+      <n-card class="glass-card" embedded>
+        <template #header>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Model inventory</p>
+              <h3>Available runtime targets</h3>
+            </div>
+          </div>
+        </template>
+        <div v-if="store.models.length === 0" class="empty-state">
+          No models configured yet.
+        </div>
+        <div v-else class="model-grid">
+          <n-card
+            v-for="item in store.models"
+            :key="item.id"
+            class="model-card"
+            embedded
+          >
+            <template #header>
+              <n-space align="center" justify="space-between">
+                <n-space align="center" :size="8">
+                  <n-icon size="20" :depth="2"><cube-outline /></n-icon>
+                  <n-text strong>{{ item.displayName }}</n-text>
+                  <n-tag :type="item.isEnabled ? 'success' : 'default'" size="tiny" round>
+                    {{ item.isEnabled ? 'Enabled' : 'Disabled' }}
+                  </n-tag>
+                </n-space>
+                <n-space :size="4">
+                  <n-button circle quaternary size="small" :loading="store.validatingModelIds.includes(item.id)" @click="handleTestModel(item.id)">
+                    <template #icon><n-icon><flash-outline /></n-icon></template>
+                  </n-button>
+                  <n-button circle quaternary size="small" @click="openModelModal(item)">
+                    <template #icon><n-icon><create-outline /></n-icon></template>
+                  </n-button>
+                  <n-popconfirm @positive-click="handleDeleteModel(item.id)">
+                    <template #trigger>
+                      <n-button circle quaternary size="small" type="error">
+                        <template #icon><n-icon><trash-outline /></n-icon></template>
+                      </n-button>
+                    </template>
+                    Delete this model?
+                  </n-popconfirm>
+                </n-space>
+              </n-space>
+            </template>
+            <n-descriptions :column="1" size="small" label-placement="left">
+              <n-descriptions-item label="Provider">{{ item.providerConnectionName }}</n-descriptions-item>
+              <n-descriptions-item label="Model Key">{{ item.modelKey }}</n-descriptions-item>
+              <n-descriptions-item label="Capabilities">
+                <n-space :size="4">
+                  <n-tag v-if="item.supportsStreaming" size="tiny" type="info">Streaming</n-tag>
+                  <n-tag v-if="item.supportsTools" size="tiny" type="info">Tools</n-tag>
+                  <n-tag v-if="item.supportsVision" size="tiny" type="info">Vision</n-tag>
+                </n-space>
+              </n-descriptions-item>
+            </n-descriptions>
+          </n-card>
+        </div>
+      </n-card>
+    </div>
+
+    <!-- Provider Modal -->
+    <n-modal v-model:show="showProviderModal" preset="card" :title="editingProvider ? 'Edit Provider' : 'Add Provider'" class="modal-shell">
+      <n-form label-placement="top">
+        <n-form-item label="Name"><n-input v-model:value="providerForm.name" data-testid="provider-name-input" /></n-form-item>
+        <n-form-item label="Provider type"><n-select v-model:value="providerForm.providerType" :options="providerOptions" @update:value="applyProviderPreset" /></n-form-item>
+        <n-form-item label="API key"><n-input v-model:value="providerForm.apiKey" type="password" show-password-on="click" data-testid="provider-key-input" /></n-form-item>
+        <n-form-item v-if="providerForm.providerType !== 'AzureOpenAI'" label="Base URL"><n-input v-model:value="providerForm.baseUrl" /></n-form-item>
+        <n-form-item v-if="providerForm.providerType === 'AzureOpenAI'" label="Endpoint"><n-input v-model:value="providerForm.endpoint" /></n-form-item>
+        <n-form-item v-if="providerForm.providerType === 'OpenAICompatible'" label="Runtime provider name"><n-input v-model:value="providerForm.providerName" placeholder="openapi" /></n-form-item>
+        <n-form-item v-if="providerForm.providerType === 'OpenAICompatible'" label="Relative path"><n-input v-model:value="providerForm.relativePath" /></n-form-item>
+        <n-form-item label="Enabled"><n-switch v-model:value="providerForm.isEnabled" /></n-form-item>
+        <n-space justify="end"><n-button @click="showProviderModal = false">Cancel</n-button><n-button type="primary" :disabled="!isProviderValid" data-testid="save-provider" @click="submitProvider">Save</n-button></n-space>
+      </n-form>
+    </n-modal>
+
+    <!-- Model Modal -->
+    <n-modal v-model:show="showModelModal" preset="card" :title="editingModel ? 'Edit Model' : 'Create Model'" class="modal-shell">
+      <n-form label-placement="top">
+        <n-form-item label="Provider connection"><n-select v-model:value="modelForm.providerConnectionId" :options="providerConnectionOptions" /></n-form-item>
+        <n-form-item label="Display name"><n-input v-model:value="modelForm.displayName" data-testid="model-display-name-input" /></n-form-item>
+        <n-form-item label="Model key / deployment"><n-input v-model:value="modelForm.modelKey" placeholder="gpt-4o-mini" data-testid="model-key-input" /></n-form-item>
+        <n-form-item label="Streaming"><n-switch v-model:value="modelForm.supportsStreaming" /></n-form-item>
+        <n-form-item label="Tools"><n-switch v-model:value="modelForm.supportsTools" /></n-form-item>
+        <n-form-item label="Vision"><n-switch v-model:value="modelForm.supportsVision" /></n-form-item>
+        <n-form-item label="Enabled"><n-switch v-model:value="modelForm.isEnabled" /></n-form-item>
+        <n-space justify="end"><n-button @click="showModelModal = false">Cancel</n-button><n-button type="primary" :disabled="!isModelValid" data-testid="save-model" @click="submitModel">Save</n-button></n-space>
+      </n-form>
+    </n-modal>
+  </section>
+</template>
+
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { useMessage, NButton, NCard, NDataTable, NForm, NFormItem, NInput, NModal, NPopconfirm, NSelect, NSpace, NSwitch, NTag } from 'naive-ui'
-
+import { useMessage, NButton, NCard, NForm, NFormItem, NInput, NModal, NPopconfirm, NSelect, NSpace, NSwitch, NTag, NIcon, NText, NEllipsis, NDescriptions, NDescriptionsItem, NDivider } from 'naive-ui'
+import { CreateOutline, TrashOutline, ServerOutline, CubeOutline, FlashOutline } from '@vicons/ionicons5'
 import { useStudioStore } from '../stores/studio'
 import type { ProviderConnectionPayload, ModelPayload } from '../api/studio'
 import type { ModelItem, ProviderConnection } from '../types'
@@ -100,24 +271,18 @@ const isModelValid = computed(() =>
   Boolean(modelForm.providerConnectionId && modelForm.displayName.trim() && modelForm.modelKey.trim()),
 )
 
-const columns = [
-  { title: 'Model', key: 'displayName' },
-  { title: 'Provider', key: 'providerConnectionName' },
-  { title: 'Runtime Key', key: 'modelKey' },
-  {
-    title: 'Capabilities',
-    key: 'capabilities',
-    render: (row: ModelItem) =>
-      [row.supportsStreaming && 'Streaming', row.supportsTools && 'Tools', row.supportsVision && 'Vision']
-        .filter(Boolean)
-        .join(' · '),
-  },
-  {
-    title: 'Status',
-    key: 'isEnabled',
-    render: (row: ModelItem) => (row.isEnabled ? 'Enabled' : 'Disabled'),
-  },
-]
+function getProviderTypeColor(type: string): 'default' | 'success' | 'warning' | 'info' {
+  switch (type) {
+    case 'OpenAI': return 'success'
+    case 'AzureOpenAI': return 'info'
+    case 'OpenAICompatible': return 'warning'
+    default: return 'default'
+  }
+}
+
+function getModelsForProvider(providerId: string): ModelItem[] {
+  return store.models.filter(m => m.providerConnectionId === providerId)
+}
 
 function resetProviderForm() {
   Object.assign(providerForm, {
@@ -246,113 +411,28 @@ async function handleTestModel(id: string) {
 }
 </script>
 
-<template>
-  <section class="page">
-    <div class="page-header">
-      <div>
-        <p class="eyebrow">Model catalog</p>
-        <h2 class="page-title">Connect providers and publish the models your agents can use.</h2>
-      </div>
-      <n-space>
-        <n-button secondary type="primary" @click="openProviderModal()">New connection</n-button>
-        <n-button type="primary" @click="openModelModal()">New model</n-button>
-      </n-space>
-    </div>
+<style scoped>
+.empty-state {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-color-3);
+}
 
-    <div class="grid-two">
-      <n-card class="glass-card" embedded>
-        <template #header>
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Provider connections</p>
-              <h3>Credentials and endpoints</h3>
-            </div>
-          </div>
-        </template>
-        <div class="list-stack" data-testid="provider-list">
-          <article v-for="item in store.providerConnections" :key="item.id" class="list-row list-row-rich">
-            <div>
-              <strong>{{ item.name }}</strong>
-              <p>{{ item.providerType }} · {{ item.apiKeyPreview }}</p>
-            </div>
-            <div class="row-actions">
-              <n-tag :type="item.isEnabled ? 'success' : 'warning'">{{ item.isEnabled ? 'Enabled' : 'Disabled' }}</n-tag>
-              <n-button text @click="openProviderModal(item)">Edit</n-button>
-              <n-popconfirm @positive-click="handleDeleteProvider(item.id)">
-                <template #trigger>
-                  <n-button text type="error" :loading="store.deletingProviderIds.includes(item.id)">Delete</n-button>
-                </template>
-                Delete this provider connection?
-              </n-popconfirm>
-            </div>
-          </article>
-        </div>
-      </n-card>
+.provider-grid,
+.model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+  gap: 16px;
+}
 
-      <n-card class="glass-card" embedded>
-        <template #header>
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Model inventory</p>
-              <h3>Available runtime targets</h3>
-            </div>
-          </div>
-        </template>
-        <n-data-table :columns="columns" :data="store.models" :bordered="false" />
-        <div class="table-actions">
-          <article v-for="item in store.models" :key="item.id" class="inline-card" data-testid="model-card">
-            <div>
-              <strong>{{ item.displayName }}</strong>
-              <p>{{ item.providerConnectionName }} · {{ item.modelKey }}</p>
-            </div>
-            <n-space>
-              <n-button text :loading="store.validatingModelIds.includes(item.id)" @click="handleTestModel(item.id)">Test</n-button>
-              <n-button text @click="openModelModal(item)">Edit</n-button>
-              <n-popconfirm @positive-click="handleDeleteModel(item.id)">
-                <template #trigger>
-                  <n-button text type="error" :loading="store.deletingModelIds.includes(item.id)">Delete</n-button>
-                </template>
-                Delete this model?
-              </n-popconfirm>
-            </n-space>
-          </article>
-        </div>
-      </n-card>
-    </div>
+.provider-card,
+.model-card {
+  transition: all 0.2s ease;
+}
 
-    <n-modal v-model:show="showProviderModal" preset="card" title="Provider connection" class="modal-shell">
-      <n-form label-placement="top">
-        <n-form-item label="Name"><n-input v-model:value="providerForm.name" data-testid="provider-name-input" /></n-form-item>
-        <n-form-item label="Provider type"><n-select v-model:value="providerForm.providerType" :options="providerOptions" @update:value="applyProviderPreset" /></n-form-item>
-        <n-form-item label="API key"><n-input v-model:value="providerForm.apiKey" type="password" show-password-on="click" data-testid="provider-key-input" /></n-form-item>
-        <n-form-item v-if="providerForm.providerType !== 'AzureOpenAI'" label="Base URL"><n-input v-model:value="providerForm.baseUrl" /></n-form-item>
-        <n-form-item v-if="providerForm.providerType === 'AzureOpenAI'" label="Endpoint"><n-input v-model:value="providerForm.endpoint" /></n-form-item>
-        <n-form-item v-if="providerForm.providerType === 'OpenAICompatible'" label="Runtime provider name"><n-input v-model:value="providerForm.providerName" placeholder="openapi" /></n-form-item>
-        <n-form-item v-if="providerForm.providerType === 'OpenAICompatible'" label="Relative path"><n-input v-model:value="providerForm.relativePath" /></n-form-item>
-        <n-form-item v-if="providerForm.providerType === 'OpenAICompatible'" label="Tip">
-          <n-input
-            :value="'To use a real OpenAI-compatible endpoint such as the OpenCode GPT-5.4 provider, set Base URL, Provider Name, API key, and the model key exactly as required by that service.'"
-            type="textarea"
-            readonly
-            :autosize="{ minRows: 3, maxRows: 4 }"
-          />
-        </n-form-item>
-        <n-form-item label="Enabled"><n-switch v-model:value="providerForm.isEnabled" /></n-form-item>
-        <n-space justify="end"><n-button @click="showProviderModal = false">Cancel</n-button><n-button type="primary" :disabled="!isProviderValid" data-testid="save-provider" @click="submitProvider">Save</n-button></n-space>
-      </n-form>
-    </n-modal>
-
-    <n-modal v-model:show="showModelModal" preset="card" title="Model" class="modal-shell">
-      <n-form label-placement="top">
-        <n-form-item label="Provider connection"><n-select v-model:value="modelForm.providerConnectionId" :options="providerConnectionOptions" /></n-form-item>
-        <n-form-item label="Display name"><n-input v-model:value="modelForm.displayName" data-testid="model-display-name-input" /></n-form-item>
-        <n-form-item label="Model key / deployment"><n-input v-model:value="modelForm.modelKey" placeholder="gpt-4o-mini" data-testid="model-key-input" /></n-form-item>
-        <n-form-item label="Streaming"><n-switch v-model:value="modelForm.supportsStreaming" /></n-form-item>
-        <n-form-item label="Tools"><n-switch v-model:value="modelForm.supportsTools" /></n-form-item>
-        <n-form-item label="Vision"><n-switch v-model:value="modelForm.supportsVision" /></n-form-item>
-        <n-form-item label="Enabled"><n-switch v-model:value="modelForm.isEnabled" /></n-form-item>
-        <n-space justify="end"><n-button @click="showModelModal = false">Cancel</n-button><n-button type="primary" :disabled="!isModelValid" data-testid="save-model" @click="submitModel">Save</n-button></n-space>
-      </n-form>
-    </n-modal>
-  </section>
-</template>
+.provider-card:hover,
+.model-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+</style>
