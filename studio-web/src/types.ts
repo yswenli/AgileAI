@@ -42,10 +42,16 @@ export interface AgentItem {
   maxTokens: number
   enableSkills: boolean
   isPinned: boolean
+  selectedToolNames: string[]
   modelDisplayName: string
   runtimeModelId: string
   createdAtUtc: string
   updatedAtUtc: string
+}
+
+export interface ToolOption {
+  name: string
+  description?: string | null
 }
 
 export interface ConversationItem {

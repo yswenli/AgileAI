@@ -90,6 +90,19 @@ public class ConversationService(StudioDbContext dbContext)
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task RenameConversationAsync(Conversation conversation, string title, CancellationToken cancellationToken)
+    {
+        var trimmedTitle = title.Trim();
+        if (string.IsNullOrWhiteSpace(trimmedTitle))
+        {
+            return;
+        }
+
+        conversation.Title = trimmedTitle.Length > 120 ? trimmedTitle[..120].Trim() : trimmedTitle;
+        conversation.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<ConversationMessage> AddMessageAsync(Guid conversationId, MessageRole role, string content, bool isStreaming, string? finishReason, int? inputTokens, int? outputTokens, CancellationToken cancellationToken)
     {
         var message = new ConversationMessage

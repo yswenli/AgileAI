@@ -115,6 +115,11 @@ app.MapGet("/api/agents", async (AgentService agentService, CancellationToken ca
     return Results.Ok(items);
 });
 
+app.MapGet("/api/agent-tools", (AgentService agentService) =>
+{
+    return Results.Ok(agentService.GetAvailableTools());
+});
+
 app.MapPost("/api/agents", async (AgentRequestDto request, AgentService agentService, CancellationToken cancellationToken) =>
 {
     var item = await agentService.CreateAgentAsync(request, cancellationToken);

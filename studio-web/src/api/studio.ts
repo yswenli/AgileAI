@@ -1,7 +1,23 @@
 import { http } from './http'
-import type { AgentItem, ChatStreamStart, ConversationItem, MessageItem, ModelItem, Overview, ProviderConnection } from '../types'
+import type { AgentItem, ChatStreamStart, ConversationItem, MessageItem, ModelItem, Overview, ProviderConnection, ToolOption } from '../types'
 
-const messageRoleMap = ['System', 'User', 'Assistant', 'Tool'] as const
+const messageRoleMap = [undefined, 'System', 'User', 'Assistant', 'Tool'] as const
+const providerTypeMap = ['OpenAI', 'OpenAI', 'OpenAICompatible', 'AzureOpenAI'] as const
+
+function normalizeProviderType(value: ProviderConnection['providerType'] | number | string): ProviderConnection['providerType'] {
+  if (typeof value === 'string') {
+    return value as ProviderConnection['providerType']
+  }
+
+  return providerTypeMap[value] ?? 'OpenAI'
+}
+
+function normalizeProviderConnection(item: ProviderConnection & { providerType: ProviderConnection['providerType'] | number | string }): ProviderConnection {
+  return {
+    ...item,
+    providerType: normalizeProviderType(item.providerType),
+  }
+}
 
 function normalizeMessageRole(role: MessageItem['role'] | number | string): MessageItem['role'] {
   if (typeof role === 'string') {
@@ -32,7 +48,7 @@ export interface ProviderConnectionPayload {
   isEnabled: boolean
 }
 
-const providerTypeMap: Record<ProviderConnectionPayload['providerType'], number> = {
+const providerTypeValueMap: Record<ProviderConnectionPayload['providerType'], number> = {
   OpenAI: 1,
   OpenAICompatible: 2,
   AzureOpenAI: 3,
@@ -41,7 +57,7 @@ const providerTypeMap: Record<ProviderConnectionPayload['providerType'], number>
 function serializeProviderConnectionPayload(payload: ProviderConnectionPayload) {
   return {
     ...payload,
-    providerType: providerTypeMap[payload.providerType],
+    providerType: providerTypeValueMap[payload.providerType],
   }
 }
 
@@ -64,6 +80,7 @@ export interface AgentPayload {
   maxTokens: number
   enableSkills: boolean
   isPinned: boolean
+  selectedToolNames: string[]
 }
 
 export async function getOverview() {
@@ -73,17 +90,17 @@ export async function getOverview() {
 
 export async function getProviderConnections() {
   const { data } = await http.get<ProviderConnection[]>('/provider-connections')
-  return data
+  return data.map((item) => normalizeProviderConnection(item as ProviderConnection & { providerType: ProviderConnection['providerType'] | number | string }))
 }
 
 export async function createProviderConnection(payload: ProviderConnectionPayload) {
   const { data } = await http.post<ProviderConnection>('/provider-connections', serializeProviderConnectionPayload(payload))
-  return data
+  return normalizeProviderConnection(data as ProviderConnection & { providerType: ProviderConnection['providerType'] | number | string })
 }
 
 export async function updateProviderConnection(id: string, payload: ProviderConnectionPayload) {
   const { data } = await http.put<ProviderConnection>(`/provider-connections/${id}`, serializeProviderConnectionPayload(payload))
-  return data
+  return normalizeProviderConnection(data as ProviderConnection & { providerType: ProviderConnection['providerType'] | number | string })
 }
 
 export async function deleteProviderConnection(id: string) {
@@ -116,6 +133,11 @@ export async function testModel(id: string) {
 
 export async function getAgents() {
   const { data } = await http.get<AgentItem[]>('/agents')
+  return data
+}
+
+export async function getAgentTools() {
+  const { data } = await http.get<ToolOption[]>('/agent-tools')
   return data
 }
 

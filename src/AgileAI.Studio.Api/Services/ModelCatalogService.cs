@@ -72,8 +72,15 @@ public class ModelCatalogService(StudioDbContext dbContext, ProviderClientFactor
 
     public async Task DeleteProviderConnectionAsync(Guid id, CancellationToken cancellationToken)
     {
-        var entity = await dbContext.ProviderConnections.FirstOrDefaultAsync(x => x.Id == id, cancellationToken)
+        var entity = await dbContext.ProviderConnections
+            .Include(x => x.Models)
+            .ThenInclude(x => x.Agents)
+            .ThenInclude(x => x.Conversations)
+            .ThenInclude(x => x.Messages)
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken)
             ?? throw new InvalidOperationException("Provider connection not found.");
+
+        RemoveDependentModels(entity.Models);
 
         dbContext.ProviderConnections.Remove(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -143,11 +150,44 @@ public class ModelCatalogService(StudioDbContext dbContext, ProviderClientFactor
 
     public async Task DeleteModelAsync(Guid id, CancellationToken cancellationToken)
     {
-        var entity = await dbContext.Models.FirstOrDefaultAsync(x => x.Id == id, cancellationToken)
+        var entity = await dbContext.Models
+            .Include(x => x.Agents)
+            .ThenInclude(x => x.Conversations)
+            .ThenInclude(x => x.Messages)
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken)
             ?? throw new InvalidOperationException("Model not found.");
+
+        RemoveDependentAgents(entity.Agents);
 
         dbContext.Models.Remove(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private void RemoveDependentModels(IEnumerable<StudioModel> models)
+    {
+        foreach (var model in models.ToList())
+        {
+            RemoveDependentAgents(model.Agents);
+            dbContext.Models.Remove(model);
+        }
+    }
+
+    private void RemoveDependentAgents(IEnumerable<AgentDefinition> agents)
+    {
+        foreach (var agent in agents.ToList())
+        {
+            RemoveDependentConversations(agent.Conversations);
+            dbContext.Agents.Remove(agent);
+        }
+    }
+
+    private void RemoveDependentConversations(IEnumerable<Conversation> conversations)
+    {
+        foreach (var conversation in conversations.ToList())
+        {
+            dbContext.Messages.RemoveRange(conversation.Messages);
+            dbContext.Conversations.Remove(conversation);
+        }
     }
 
     public async Task<ProviderRuntimeOptions> GetRuntimeOptionsAsync(Guid studioModelId, CancellationToken cancellationToken)

@@ -8,6 +8,7 @@ import {
   deleteModel,
   deleteProviderConnection,
   getAgents,
+  getAgentTools,
   getConversations,
   getMessages,
   getModels,
@@ -23,7 +24,7 @@ import {
   type ModelPayload,
   type ProviderConnectionPayload,
 } from '../api/studio'
-import type { AgentItem, ConversationItem, MessageItem, ModelItem, Overview, ProviderConnection } from '../types'
+import type { AgentItem, ConversationItem, MessageItem, ModelItem, Overview, ProviderConnection, ToolOption } from '../types'
 
 export const useStudioStore = defineStore('studio', {
   state: () => ({
@@ -31,6 +32,7 @@ export const useStudioStore = defineStore('studio', {
     providerConnections: [] as ProviderConnection[],
     models: [] as ModelItem[],
     agents: [] as AgentItem[],
+    agentTools: [] as ToolOption[],
     conversations: [] as ConversationItem[],
     messagesByConversation: {} as Record<string, MessageItem[]>,
     activeConversationId: '' as string,
@@ -54,17 +56,19 @@ export const useStudioStore = defineStore('studio', {
     async bootstrap() {
       this.isLoading = true
       try {
-        const [overview, providerConnections, models, agents, conversations] = await Promise.all([
+        const [overview, providerConnections, models, agents, agentTools, conversations] = await Promise.all([
           getOverview(),
           getProviderConnections(),
           getModels(),
           getAgents(),
+          getAgentTools(),
           getConversations(),
         ])
         this.overview = overview
         this.providerConnections = providerConnections
         this.models = models
         this.agents = agents
+        this.agentTools = agentTools
         this.conversations = conversations
         if (!this.activeConversationId && conversations.length > 0) {
           this.activeConversationId = conversations[0].id

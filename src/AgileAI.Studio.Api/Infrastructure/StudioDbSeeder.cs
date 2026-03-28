@@ -10,6 +10,10 @@ public static class StudioDbSeeder
     {
         await dbContext.Database.EnsureCreatedAsync(cancellationToken);
 
+        await dbContext.Database.ExecuteSqlRawAsync(
+            "CREATE TABLE IF NOT EXISTS \"AgentToolSelections\" (\"AgentDefinitionId\" TEXT NOT NULL CONSTRAINT \"PK_AgentToolSelections\" PRIMARY KEY, \"ToolNamesJson\" TEXT NOT NULL)",
+            cancellationToken);
+
         if (await dbContext.ProviderConnections.AnyAsync(cancellationToken))
         {
             return;

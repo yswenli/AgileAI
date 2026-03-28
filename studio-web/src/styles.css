@@ -410,6 +410,8 @@ select {
 }
 
 .message-bubble {
+  display: flex;
+  flex-direction: column;
   max-width: 78%;
   padding: 16px 18px;
   border-radius: 22px;
@@ -419,15 +421,33 @@ select {
 .message-bubble.user {
   margin-left: auto;
   background: rgba(37, 99, 235, 0.12);
+  border-top-right-radius: 8px;
+  align-items: flex-start;
 }
 
 .message-bubble.assistant {
   background: rgba(20, 184, 166, 0.08);
+  border-top-left-radius: 8px;
+  margin-right: auto;
+  align-items: flex-start;
+}
+
+.message-bubble.system,
+.message-bubble.tool {
+  margin: 0 auto;
+  background: rgba(148, 163, 184, 0.12);
 }
 
 .message-bubble p {
   margin: 6px 0 0;
   line-height: 1.7;
+}
+
+.message-role {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .message-meta {
@@ -448,9 +468,10 @@ select {
 
 .chat-composer-actions {
   margin-top: 14px;
-  display: grid;
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
   align-items: stretch;
+  gap: 10px;
 }
 
 .chat-status-line {
@@ -460,8 +481,15 @@ select {
 }
 
 .chat-send-row {
+  width: 100%;
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+}
+
+.chat-send-row .n-button,
+.chat-send-row .chat-send-button {
+  margin-left: auto;
 }
 
 .composer :is(textarea, .n-input__textarea-el) {

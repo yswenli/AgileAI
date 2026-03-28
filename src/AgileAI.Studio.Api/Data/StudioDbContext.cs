@@ -8,6 +8,7 @@ public class StudioDbContext(DbContextOptions<StudioDbContext> options) : DbCont
     public DbSet<ProviderConnection> ProviderConnections => Set<ProviderConnection>();
     public DbSet<StudioModel> Models => Set<StudioModel>();
     public DbSet<AgentDefinition> Agents => Set<AgentDefinition>();
+    public DbSet<AgentToolSelection> AgentToolSelections => Set<AgentToolSelection>();
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<ConversationMessage> Messages => Set<ConversationMessage>();
 
@@ -73,6 +74,13 @@ public class StudioDbContext(DbContextOptions<StudioDbContext> options) : DbCont
             entity.ToTable("Messages");
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Content).HasMaxLength(32000);
+        });
+
+        modelBuilder.Entity<AgentToolSelection>(entity =>
+        {
+            entity.ToTable("AgentToolSelections");
+            entity.HasKey(x => x.AgentDefinitionId);
+            entity.Property(x => x.ToolNamesJson).HasMaxLength(8000);
         });
     }
 }

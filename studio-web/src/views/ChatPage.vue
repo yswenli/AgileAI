@@ -5,15 +5,18 @@
       <n-card class="glass-card chat-stage" embedded>
         <template #header>
           <div class="chat-heading-meta">
-            <n-tag v-if="activeConversation" type="success">{{ activeConversation.agentName }}</n-tag>
-            <n-tag v-if="activeAgent" type="info" bordered>{{ activeAgent.name }} · {{ activeAgent.modelDisplayName }}</n-tag>
+            <div class="chat-heading-copy">
+              <h3 class="chat-heading-title">{{ activeAgent?.name ?? activeConversation?.agentName ?? 'Chat' }}</h3>
+            </div>
+            <n-tag v-if="activeModelSummary" type="info" bordered>{{ activeModelSummary }}</n-tag>
           </div>
         </template>
 
         <div v-if="activeMessages.length" ref="transcriptRef" class="message-stack" data-testid="chat-transcript">
           <article v-for="item in activeMessages" :key="item.id" class="message-bubble" :class="item.role.toLowerCase()" :data-testid="`message-${item.role.toLowerCase()}`">
-            <span class="message-role">{{ item.role }}</span>
-            <p>{{ item.content }}</p>
+            <span class="message-role">{{ item.role === 'User' ? 'You' : item.role === 'Assistant' ? activeConversation?.agentName ?? 'Assistant' : item.role }}</span>
+            <div v-if="item.role === 'Assistant'" class="message-markdown" v-html="renderAssistantMessage(item.content)"></div>
+            <p v-else>{{ item.content }}</p>
             <div v-if="item.role === 'Assistant'" class="message-meta">
               <span v-if="item.inputTokens || item.outputTokens">{{ item.inputTokens ?? 0 }} in · {{ item.outputTokens ?? 0 }} out</span>
               <n-spin v-if="item.isStreaming" size="small" />
@@ -29,6 +32,7 @@
             placeholder="Ask your agent to plan, write, summarize, or analyze..."
             :autosize="{ minRows: 3, maxRows: 6 }"
             data-testid="chat-input"
+            @keydown.enter.exact.prevent="submitPrompt"
           />
           <div class="composer-actions chat-composer-actions">
             <p v-if="store.isStreaming || store.streamError" class="chat-status-line">
@@ -36,7 +40,7 @@
               <span v-if="store.streamError">{{ store.streamError }}</span>
             </p>
             <div class="chat-send-row">
-              <n-button type="primary" :loading="isSending" data-testid="send-message" @click="submitPrompt">Send</n-button>
+              <n-button class="chat-send-button" type="primary" :loading="isSending" data-testid="send-message" @click="submitPrompt">Send</n-button>
             </div>
           </div>
         </div>
@@ -44,6 +48,12 @@
 
       <!-- Right Sidebar: Conversation History -->
       <n-card class="glass-card chat-side" embedded>
+        <template #header>
+          <div class="chat-side-header">
+            <span class="chat-side-title">Sessions</span>
+            <n-button size="small" type="primary" secondary @click="handleNewSession">New Session</n-button>
+          </div>
+        </template>
         <div class="conversation-list">
           <n-empty v-if="sortedConversations.length === 0" description="No conversations" size="small" />
           <div v-else class="conversation-card-list" data-testid="conversation-list">
@@ -57,7 +67,7 @@
               @click="selectConversation(conv.id)"
             >
               <strong>{{ conv.title }}</strong>
-              <span>{{ conv.agentName }} · {{ conv.messageCount }} messages</span>
+              <span>{{ formatConversationMeta(conv) }}</span>
             </n-card>
           </div>
         </div>
@@ -70,6 +80,8 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useMessage, NButton, NCard, NEmpty, NInput, NSpin, NTag } from 'naive-ui'
+import DOMPurify from 'dompurify'
+import { marked } from 'marked'
 import { useStudioStore } from '../stores/studio'
 
 const route = useRoute()
@@ -83,6 +95,19 @@ const transcriptRef = ref<HTMLElement | null>(null)
 
 const activeConversation = computed(() => store.activeConversation)
 const activeMessages = computed(() => store.activeMessages)
+
+marked.setOptions({
+  breaks: true,
+  gfm: true,
+})
+
+function renderAssistantMessage(content: string) {
+  const html = marked.parse(content || '', { async: false })
+  return DOMPurify.sanitize(html, {
+    USE_PROFILES: { html: true },
+  })
+}
+
 const activeAgent = computed(() => {
   if (activeConversation.value?.agentId) {
     return store.agents.find((item) => item.id === activeConversation.value?.agentId) ?? null
@@ -93,6 +118,22 @@ const activeAgent = computed(() => {
   }
 
   return null
+})
+
+const activeModel = computed(() => {
+  if (!activeAgent.value) {
+    return null
+  }
+
+  return store.models.find((item) => item.id === activeAgent.value?.studioModelId) ?? null
+})
+
+const activeModelSummary = computed(() => {
+  if (!activeModel.value) {
+    return activeAgent.value?.modelDisplayName ?? ''
+  }
+
+  return `${activeModel.value.providerConnectionName} · ${activeModel.value.displayName}`
 })
 
 // Filter conversations by selected agent
@@ -177,9 +218,12 @@ async function createConversationForAgent() {
     return
   }
 
-  const agent = store.agents.find((item) => item.id === selectedAgentId.value)
-  const conversation = await store.createConversation(selectedAgentId.value, agent ? `${agent.name} session` : 'New chat')
+  const conversation = await store.createConversation(selectedAgentId.value, 'New Session')
   await store.fetchMessages(conversation.id)
+}
+
+async function handleNewSession() {
+  await createConversationForAgent()
 }
 
 async function selectConversation(id: string) {
@@ -191,7 +235,9 @@ async function selectConversation(id: string) {
 }
 
 async function submitPrompt() {
-  if (!prompt.value.trim()) {
+  const content = prompt.value.trim()
+
+  if (!content) {
     return
   }
 
@@ -212,20 +258,132 @@ async function submitPrompt() {
     return
   }
 
+  prompt.value = ''
   isSending.value = true
   try {
-    await store.streamMessage(store.activeConversationId, prompt.value)
+    await store.streamMessage(store.activeConversationId, content)
     await store.fetchMessages(store.activeConversationId)
-    prompt.value = ''
   } catch (error) {
+    prompt.value = content
     message.error((error as Error).message)
   } finally {
     isSending.value = false
   }
 }
+
+function formatConversationMeta(conversation: { createdAtUtc: string; messageCount: number }) {
+  const createdAt = new Date(conversation.createdAtUtc)
+  const dateLabel = Number.isNaN(createdAt.getTime())
+    ? conversation.createdAtUtc
+    : createdAt.toLocaleString([], {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+
+  return `${dateLabel} · ${conversation.messageCount} messages`
+}
 </script>
 
 <style scoped>
+.chat-side-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chat-side-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.chat-composer-actions {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.chat-send-row {
+  display: flex;
+  width: 100%;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  align-self: stretch;
+}
+
+.chat-send-button {
+  margin-left: auto;
+}
+
+.chat-heading-copy {
+  min-width: 0;
+}
+
+.chat-heading-title {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.message-markdown {
+  margin-top: 6px;
+  line-height: 1.7;
+}
+
+.message-markdown :deep(p) {
+  margin: 0 0 12px;
+}
+
+.message-markdown :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.message-markdown :deep(ul),
+.message-markdown :deep(ol) {
+  margin: 0 0 12px;
+  padding-left: 20px;
+}
+
+.message-markdown :deep(li + li) {
+  margin-top: 4px;
+}
+
+.message-markdown :deep(pre) {
+  overflow-x: auto;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.78);
+  color: #e2e8f0;
+}
+
+.message-markdown :deep(code) {
+  font-family: ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.92em;
+}
+
+.message-markdown :deep(:not(pre) > code) {
+  padding: 0.16em 0.4em;
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.2);
+}
+
+.message-markdown :deep(blockquote) {
+  margin: 0 0 12px;
+  padding-left: 12px;
+  border-left: 3px solid rgba(20, 184, 166, 0.45);
+  color: var(--text-soft);
+}
+
+.message-markdown :deep(a) {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 .conversation-card-list {
   display: grid;
   gap: 8px;

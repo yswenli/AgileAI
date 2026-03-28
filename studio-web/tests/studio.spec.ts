@@ -83,6 +83,48 @@ test('agents page renders and cards navigate into chat', async ({ page }) => {
   }
 })
 
+test('agent create and edit can configure selected tools with default all checked', async ({ page, request }) => {
+  await page.goto('/agents')
+  await page.getByTestId('create-agent').click()
+  const agentName = `PW Tools Agent ${Date.now()}`
+
+  const toolsResponse = await request.get('http://127.0.0.1:5117/api/agent-tools')
+  expect(toolsResponse.ok()).toBeTruthy()
+  const tools = await toolsResponse.json()
+  expect(tools.length).toBeGreaterThan(0)
+
+  await page.locator('.agent-tools-collapse').getByText('Tools', { exact: true }).click()
+
+  const toolCheckboxes = page.getByRole('checkbox').filter({ hasText: /.+/ })
+  await expect(toolCheckboxes).toHaveCount(tools.length)
+
+  for (const tool of tools) {
+    await expect(page.getByRole('checkbox', { name: tool.name, exact: true })).toBeChecked()
+  }
+
+  await page.getByTestId('agent-name-input').locator('input').fill(agentName)
+  await page.getByTestId('agent-description-input').locator('textarea').fill('Agent tool selection validation.')
+  await page.getByTestId('agent-prompt-input').locator('textarea').fill('Use only configured tools.')
+
+  if (tools.length > 0) {
+    await page.getByRole('checkbox', { name: tools[0].name, exact: true }).uncheck()
+  }
+
+  await page.getByTestId('save-agent').click()
+
+  const createdCard = page.locator('.agent-card', { hasText: agentName }).first()
+  await expect(createdCard).toBeVisible()
+  await createdCard.locator('button').first().click()
+  await page.locator('.agent-tools-collapse').getByText('Tools', { exact: true }).click()
+
+  if (tools.length > 0) {
+    await expect(page.getByRole('checkbox', { name: tools[0].name, exact: true })).not.toBeChecked()
+  }
+  for (const tool of tools.slice(1)) {
+    await expect(page.getByRole('checkbox', { name: tool.name, exact: true })).toBeChecked()
+  }
+})
+
 test('real provider flow can create provider model agent and send a chat message', async ({ page }) => {
   test.setTimeout(120_000)
 

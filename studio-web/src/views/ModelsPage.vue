@@ -139,12 +139,15 @@
     <n-modal v-model:show="showProviderModal" preset="card" :title="editingProvider ? 'Edit Provider' : 'Add Provider'" class="modal-shell">
       <n-form label-placement="top">
         <n-form-item label="Name"><n-input v-model:value="providerForm.name" data-testid="provider-name-input" /></n-form-item>
-        <n-form-item label="Provider type"><n-select v-model:value="providerForm.providerType" :options="providerOptions" @update:value="applyProviderPreset" /></n-form-item>
+        <n-form-item label="Provider type"><n-select v-model:value="providerForm.providerType" :options="providerOptions" @update:value="handleProviderTypeChange" /></n-form-item>
         <n-form-item label="API key"><n-input v-model:value="providerForm.apiKey" type="password" show-password-on="click" data-testid="provider-key-input" /></n-form-item>
         <n-form-item v-if="providerForm.providerType !== 'AzureOpenAI'" label="Base URL"><n-input v-model:value="providerForm.baseUrl" /></n-form-item>
         <n-form-item v-if="providerForm.providerType === 'AzureOpenAI'" label="Endpoint"><n-input v-model:value="providerForm.endpoint" /></n-form-item>
         <n-form-item v-if="providerForm.providerType === 'OpenAICompatible'" label="Runtime provider name"><n-input v-model:value="providerForm.providerName" placeholder="openapi" /></n-form-item>
         <n-form-item v-if="providerForm.providerType === 'OpenAICompatible'" label="Relative path"><n-input v-model:value="providerForm.relativePath" /></n-form-item>
+        <n-form-item v-if="providerForm.providerType === 'OpenAICompatible'" label="Auth mode"><n-input v-model:value="providerForm.authMode" placeholder="Bearer" /></n-form-item>
+        <n-form-item v-if="providerForm.providerType === 'OpenAICompatible'" label="API key header name"><n-input v-model:value="providerForm.apiKeyHeaderName" placeholder="x-api-key" /></n-form-item>
+        <n-form-item v-if="providerForm.providerType === 'AzureOpenAI'" label="API version"><n-input v-model:value="providerForm.apiVersion" placeholder="2024-02-01" /></n-form-item>
         <n-form-item label="Enabled"><n-switch v-model:value="providerForm.isEnabled" /></n-form-item>
         <n-space justify="end"><n-button @click="showProviderModal = false">Cancel</n-button><n-button type="primary" :disabled="!isProviderValid" data-testid="save-provider" @click="submitProvider">Save</n-button></n-space>
       </n-form>
@@ -213,32 +216,58 @@ const providerOptions = [
   { label: 'Azure OpenAI', value: 'AzureOpenAI' },
 ]
 
-function applyProviderPreset(type: 'OpenAI' | 'OpenAICompatible' | 'AzureOpenAI') {
+function getProviderTypeDefaults(type: 'OpenAI' | 'OpenAICompatible' | 'AzureOpenAI') {
   if (type === 'OpenAI') {
-    providerForm.baseUrl = 'https://api.openai.com/v1/'
-    providerForm.providerName = ''
-    providerForm.relativePath = 'chat/completions'
-    providerForm.authMode = 'Bearer'
-    providerForm.apiKeyHeaderName = ''
-    providerForm.endpoint = ''
-    return
+    return {
+      baseUrl: 'https://api.openai.com/v1/',
+      endpoint: '',
+      providerName: '',
+      relativePath: 'chat/completions',
+      authMode: 'Bearer',
+      apiKeyHeaderName: '',
+      apiVersion: '2024-02-01',
+    }
   }
 
   if (type === 'OpenAICompatible') {
-    providerForm.baseUrl = 'https://api.openai.com/v1/'
-    providerForm.providerName = 'openapi'
-    providerForm.relativePath = 'chat/completions'
-    providerForm.authMode = 'Bearer'
-    providerForm.apiKeyHeaderName = ''
-    providerForm.endpoint = ''
-    return
+    return {
+      baseUrl: 'https://api.openai.com/v1/',
+      endpoint: '',
+      providerName: 'openapi',
+      relativePath: 'chat/completions',
+      authMode: 'Bearer',
+      apiKeyHeaderName: '',
+      apiVersion: '2024-02-01',
+    }
   }
 
-  providerForm.endpoint = 'https://your-resource.openai.azure.com/'
-  providerForm.baseUrl = ''
-  providerForm.providerName = ''
-  providerForm.relativePath = 'chat/completions'
-  providerForm.authMode = 'Bearer'
+  return {
+    baseUrl: '',
+    endpoint: 'https://your-resource.openai.azure.com/',
+    providerName: '',
+    relativePath: 'chat/completions',
+    authMode: 'Bearer',
+    apiKeyHeaderName: '',
+    apiVersion: '2024-02-01',
+  }
+}
+
+function applyProviderPreset(type: 'OpenAI' | 'OpenAICompatible' | 'AzureOpenAI', options?: { force?: boolean }) {
+  const defaults = getProviderTypeDefaults(type)
+  const force = options?.force ?? false
+
+  providerForm.providerType = type
+  providerForm.baseUrl = force || !providerForm.baseUrl?.trim() ? defaults.baseUrl : providerForm.baseUrl
+  providerForm.endpoint = force || !providerForm.endpoint?.trim() ? defaults.endpoint : providerForm.endpoint
+  providerForm.providerName = force || !providerForm.providerName?.trim() ? defaults.providerName : providerForm.providerName
+  providerForm.relativePath = force || !providerForm.relativePath?.trim() ? defaults.relativePath : providerForm.relativePath
+  providerForm.authMode = force || !providerForm.authMode?.trim() ? defaults.authMode : providerForm.authMode
+  providerForm.apiKeyHeaderName = force || !providerForm.apiKeyHeaderName?.trim() ? defaults.apiKeyHeaderName : providerForm.apiKeyHeaderName
+  providerForm.apiVersion = force || !providerForm.apiVersion?.trim() ? defaults.apiVersion : providerForm.apiVersion
+}
+
+function handleProviderTypeChange(type: 'OpenAI' | 'OpenAICompatible' | 'AzureOpenAI') {
+  applyProviderPreset(type)
 }
 
 const providerConnectionOptions = computed(() =>
@@ -323,7 +352,7 @@ function resetProviderForm() {
     apiVersion: '2024-02-01',
     isEnabled: true,
   })
-  applyProviderPreset('OpenAI')
+  applyProviderPreset('OpenAI', { force: true })
 }
 
 function resetModelForm() {
@@ -354,6 +383,7 @@ function openProviderModal(item?: ProviderConnection) {
       apiVersion: item.apiVersion ?? '2024-02-01',
       isEnabled: item.isEnabled,
     })
+    applyProviderPreset(providerForm.providerType)
   } else {
     resetProviderForm()
   }

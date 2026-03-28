@@ -50,7 +50,7 @@
       </n-card>
     </div>
 
-    <n-modal v-model:show="showModal" preset="card" :title="editing ? 'Edit Agent' : 'Create Agent'" class="modal-shell modal-wide">
+    <n-modal v-model:show="showModal" preset="card" :title="editing ? 'Edit Agent' : 'Create Agent'" class="modal-shell agent-modal-shell">
       <n-form label-placement="top">
         <n-form-item label="Name"><n-input v-model:value="form.name" data-testid="agent-name-input" /></n-form-item>
         <n-form-item label="Description"><n-input v-model:value="form.description" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" data-testid="agent-description-input" /></n-form-item>
@@ -66,6 +66,21 @@
           <n-form-item label="Enable skills"><n-switch v-model:value="form.enableSkills" /></n-form-item>
           <n-form-item label="Pin on top"><n-switch v-model:value="form.isPinned" /></n-form-item>
         </div>
+        <n-collapse class="agent-tools-collapse">
+          <n-collapse-item title="Tools" name="tools">
+            <n-checkbox-group v-model:value="form.selectedToolNames" class="agent-tool-group">
+              <div class="agent-tool-grid">
+                <n-checkbox
+                  v-for="tool in toolOptions"
+                  :key="tool.value"
+                  :value="tool.value"
+                  :label="tool.label"
+                  class="agent-tool-option"
+                />
+              </div>
+            </n-checkbox-group>
+          </n-collapse-item>
+        </n-collapse>
         <div class="modal-actions"><n-button @click="showModal = false">Cancel</n-button><n-button type="primary" :disabled="!isFormValid" data-testid="save-agent" @click="submit">Save</n-button></div>
       </n-form>
     </n-modal>
@@ -75,7 +90,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useMessage, NButton, NCard, NForm, NFormItem, NInput, NInputNumber, NModal, NPopconfirm, NSelect, NSwitch, NTag, NIcon, NText, NEllipsis, NSpace } from 'naive-ui'
+import { useMessage, NButton, NCard, NCheckbox, NCheckboxGroup, NCollapse, NCollapseItem, NForm, NFormItem, NInput, NInputNumber, NModal, NPopconfirm, NSelect, NSwitch, NTag, NIcon, NText, NEllipsis, NSpace } from 'naive-ui'
 import { CreateOutline, TrashOutline, BoatOutline } from '@vicons/ionicons5'
 import { useStudioStore } from '../stores/studio'
 import type { AgentPayload } from '../api/studio'
@@ -97,10 +112,15 @@ const form = reactive<AgentPayload>({
   maxTokens: 2048,
   enableSkills: false,
   isPinned: false,
+  selectedToolNames: [],
 })
 
 const modelOptions = computed(() =>
   store.models.map((item) => ({ label: `${item.displayName} · ${item.providerConnectionName}`, value: item.id })),
+)
+
+const toolOptions = computed(() =>
+  store.agentTools.map((tool) => ({ label: tool.name, value: tool.name })),
 )
 
 const isFormValid = computed(() => {
@@ -123,6 +143,7 @@ function resetForm() {
     maxTokens: 2048,
     enableSkills: false,
     isPinned: false,
+    selectedToolNames: store.agentTools.map((tool) => tool.name),
   })
 }
 
@@ -138,6 +159,7 @@ function openModal(item?: AgentItem) {
       maxTokens: item.maxTokens,
       enableSkills: item.enableSkills,
       isPinned: item.isPinned,
+      selectedToolNames: item.selectedToolNames.length ? [...item.selectedToolNames] : store.agentTools.map((tool) => tool.name),
     })
   } else {
     resetForm()
@@ -199,5 +221,33 @@ function navigateToChat(agent: AgentItem) {
 .agent-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.agent-tool-group {
+  width: 100%;
+}
+
+.agent-tools-collapse {
+  margin-top: 8px;
+}
+
+.agent-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.agent-tool-option {
+  width: 100%;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 12px;
+}
+
+@media (max-width: 900px) {
+  .agent-tool-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

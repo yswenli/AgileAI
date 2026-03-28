@@ -1,180 +1,115 @@
 # SESSION_HANDOFF.md — AgileAI 当前交接状态
 
-> 最后更新: 2026-03-26
+> 最后更新: 2026-03-29
 
 ---
 
 ## 1. 本次交付摘要
 
-本次完成了两大类工作：
+本轮工作主要集中在 AgileAI Studio 的可用性修复、聊天体验完善，以及 Agent 工具配置能力落地。
 
-1. **后端 / 文件系统工具修复**
-2. **AgileAI Studio 前端 UI 重构与自动化验证**
-
-当前代码状态已经过验证：
+当前已完成并验证的结果：
 
 - `dotnet build AgileAI.slnx` ✅
-- `dotnet test tests/AgileAI.Tests/AgileAI.Tests.csproj` ✅ `158/158`
 - `studio-web npm run build` ✅
-- `studio-web npm run test:e2e` ✅ `4/4`
+- `npx playwright test tests/studio.spec.ts -g "agent create and edit can configure selected tools with default all checked"` ✅
 
 ---
 
-## 2. 后端与工具层已完成内容
+## 2. 本轮已完成内容
 
-### 2.1 修复 Studio API 启动失败
-
-修复文件：
-
-- `src/AgileAI.Extensions.FileSystem/FileSystemToolRegistryFactory.cs`
-
-问题：文件末尾多余的 `}` 导致后端构建失败。  
-结果：`AgileAI.Studio.Api` 可正常构建并运行。
-
-### 2.2 修复测试编译兼容性
-
-修复文件：
-
-- `src/AgileAI.Abstractions/ToolExecutionContext.cs`
-
-新增：
-
-- 无参构造函数
-- `ToolExecutionContext(ToolCall toolCall)` 兼容构造函数
-
-目的：兼容现有测试中 `new ToolExecutionContext(toolCall)` 的调用方式。
-
-### 2.3 修复文件系统工具与测试契约不一致
-
-修复文件：
-
-- `src/AgileAI.Extensions.FileSystem/DeleteFileTool.cs`
-- `src/AgileAI.Extensions.FileSystem/DeleteDirectoryTool.cs`
-- `src/AgileAI.Extensions.FileSystem/MoveFileTool.cs`
-- `src/AgileAI.Extensions.FileSystem/PatchFileTool.cs`
-
-修复内容：
-
-- 软删除结果文案统一改为 `Recycle Bin`
-- 删除目录请求模型改为可稳定 JSON 绑定的类
-- `move_file` 请求增加 JSON 属性映射：
-  - `source_path`
-  - `destination_path`
-- `patch_file` 请求增加 JSON 属性映射：
-  - `create_if_missing`
-
-结果：
-
-- 文件系统相关测试全部恢复通过
-- 整个 solution 构建通过
-
----
-
-## 3. Studio 前端已完成内容
-
-前端目录：`studio-web`
-
-### 3.1 导航与壳层调整
+### 2.1 Studio 聊天与会话体验修复
 
 修改文件：
 
-- `studio-web/src/components/StudioShell.vue`
-- `studio-web/src/router.ts`
+- `src/AgileAI.Studio.Api/Services/AgentExecutionService.cs`
+- `src/AgileAI.Studio.Api/Services/ConversationService.cs`
+- `studio-web/src/api/studio.ts`
+- `studio-web/src/stores/studio.ts`
+- `studio-web/src/styles.css`
+- `studio-web/src/views/ChatPage.vue`
 
 已完成：
 
-- 去掉左侧品牌区的 `A` icon
-- 去掉 `VERSION ONE` 面板
-- 去掉导航中的 `Overview`
-- 去掉导航中的 `Chat`
-- 将根路由 `/` 改为重定向到 `/models`
-- 将 Light/Dark 切换改为右上角 icon 按钮
+- 修复消息角色枚举映射错误，恢复经典聊天布局：
+  - 用户消息在右侧
+  - assistant 消息在左侧
+- 聊天输入支持：
+  - `Enter` 发送
+  - `Shift+Enter` 换行
+  - 发送后立即清空输入框，失败时恢复
+- Send 按钮对齐修复为右侧
+- assistant 消息支持 Markdown 渲染：
+  - 段落 / 列表 / 代码块 / 行内 code / blockquote / link
+- 聊天头部改为：
+  - Agent 名字单独显示
+  - tag 显示 `provider · model`
+- 右侧 session 列表新增 `New Session`
+- session 列表显示：
+  - 标题
+  - 创建时间
+  - message 数
+- 后端 `/stream` 接口改为真实 SSE 增量输出：
+  - `message-created`
+  - `text-delta`
+  - `usage`
+  - `final-message`
+  - `completed`
+- 首轮对话后会话标题支持自动更新：
+  - 优先尝试 LLM 生成
+  - 失败时退回首条用户消息截断标题
 
-### 3.2 Models 页面重构
+### 2.2 Provider / Model 管理页修复
 
 修改文件：
 
+- `src/AgileAI.Studio.Api/Services/ModelCatalogService.cs`
+- `studio-web/src/api/studio.ts`
 - `studio-web/src/views/ModelsPage.vue`
 
 已完成：
 
-- 页面改成双栏布局
-  - 左侧：`providers`
-  - 右侧：当前 provider 的 `models`
-- provider 支持选中态高亮
-- 右侧仅展示当前选中的 provider 对应 models
-- 未选中 provider 时展示空状态
-- `New model` 行为绑定到当前选中的 provider
+- 修复删除 provider / model 时的 500：
+  - 删除 provider 前清理 `models -> agents -> conversations/messages`
+  - 删除 model 前清理 `agents -> conversations/messages`
+- 修复 provider 编辑页 `providerType` 数字枚举显示问题
+- 修复 provider 编辑页 `OpenAI Compatible` 缺字段问题
+- 修复切换 provider type 时表单值被粗暴覆盖的问题
 
-### 3.3 Agents → Chat 流程修复
+### 2.3 Agent 工具选择能力落地
 
 修改文件：
 
-- `studio-web/src/views/AgentsPage.vue`
-- `studio-web/src/views/ChatPage.vue`
+- `src/AgileAI.Studio.Api/Contracts/Models.cs`
+- `src/AgileAI.Studio.Api/Data/StudioDbContext.cs`
+- `src/AgileAI.Studio.Api/Domain/AgentToolSelection.cs`
+- `src/AgileAI.Studio.Api/Infrastructure/StudioDbSeeder.cs`
+- `src/AgileAI.Studio.Api/Program.cs`
+- `src/AgileAI.Studio.Api/Services/AgentExecutionService.cs`
+- `src/AgileAI.Studio.Api/Services/AgentService.cs`
+- `src/AgileAI.Extensions.FileSystem/FileSystemToolRegistryFactory.cs`
 - `studio-web/src/api/studio.ts`
+- `studio-web/src/stores/studio.ts`
+- `studio-web/src/types.ts`
+- `studio-web/src/views/AgentsPage.vue`
+- `studio-web/tests/studio.spec.ts`
 
 已完成：
 
-- 点击 agent 卡片后可正确进入 `/chat?agentId=...`
-- Chat 页面收到 `agentId` 后会立即同步会话状态
-- 修复消息角色为数字枚举时的渲染崩溃问题
-  - 在 API 层将 message role 标准化为：
-    - `System`
-    - `User`
-    - `Assistant`
-    - `Tool`
-
-### 3.4 大屏居中布局修复
-
-修改文件：
-
-- `studio-web/src/styles.css`
-
-问题：右侧主区域 `.shell-main` 未占满 sidebar 之外的剩余宽度，导致大屏下内容视觉上不居中。
-
-修复：
-
-- 为 `.shell-main` 增加：
-  - `flex: 1 1 auto`
-  - `width: 100%`
-  - `min-width: 0`
-
-验证：1800px 视口下，主内容左右 gutter 为对称值：
-
-- left: `40px`
-- right: `40px`
+- Agent 新建 / 编辑支持配置所需工具
+- 默认勾选所有工具
+- 保存后会持久化已选工具
+- 重新编辑时会正确回填
+- 后端新增 `/api/agent-tools` 返回可选工具列表
+- 运行时只向 agent 注入它已选择的工具
+- 兼容旧 SQLite 库：启动时自动创建 `AgentToolSelections` 表
+- Agent 弹窗已恢复为单栏流式布局
+- Tools 配置默认折叠
+- tools item 的灰色背景已移除
 
 ---
 
-## 4. 自动化验证
-
-### 4.1 Playwright 配置已更新
-
-修改文件：
-
-- `studio-web/playwright.config.ts`
-- `studio-web/tests/studio.spec.ts`
-
-更新内容：
-
-- `baseURL` 对齐当前前端开发端口：`http://localhost:5173`
-- 移除与本地已启动服务冲突的内建 `webServer`
-- 重写 e2e 用例以匹配当前 UI 结构
-
-### 4.2 当前 Playwright 覆盖内容
-
-通过的用例：
-
-1. root 重定向到 `/models`
-2. 壳层导航只保留 `Models` / `Agents`
-3. 右上角主题切换按钮可用
-4. Models 页面双栏结构正常
-5. Agents 页面可进入 Chat，且 Chat 输入框正常显示
-
----
-
-## 5. 当前运行方式
+## 3. 当前运行方式
 
 ### 后端
 
@@ -191,7 +126,7 @@ dotnet run --project src/AgileAI.Studio.Api/AgileAI.Studio.Api.csproj
 ```bash
 cd studio-web
 npm install
-npm run dev -- --host 0.0.0.0
+npm run dev -- --host 0.0.0.0 --port 5173
 ```
 
 默认访问：
@@ -202,52 +137,85 @@ npm run dev -- --host 0.0.0.0
 
 ```bash
 dotnet build AgileAI.slnx
-dotnet test tests/AgileAI.Tests/AgileAI.Tests.csproj
 
 cd studio-web
 npm run build
-npm run test:e2e
+npx playwright test tests/studio.spec.ts -g "agent create and edit can configure selected tools with default all checked"
 ```
 
 ---
 
-## 6. 当前无阻塞项
+## 4. 当前已知情况
 
-当前没有已知 blocker。
-
-仍可继续优化但不影响交付：
-
-- 前端大包体警告（Vite chunk > 500kB）
-- `DashboardPage.vue` 目前已不再作为主入口页面，可后续决定是否保留或删除
-- 可继续微调 sidebar 宽度与主内容最大宽度以优化大屏视觉密度
+- Studio 主要前端/后端改动已经通过构建验证
+- Agent 工具选择功能已经过 Playwright e2e 验证
+- 当前环境里仍存在一类与 provider/runtime 配置有关的运行时问题：某些真实 provider 请求可能返回 `500/502`，这不属于本轮 Agent tools UI 功能本身的编译或表单链路错误
 
 ---
 
-## 7. 关键文件清单
+## 5. 下一步建议（待做）
 
-### 后端 / 测试
+### 5.1 排查真实 provider 的 500 / 502 问题
 
-- `src/AgileAI.Abstractions/ToolExecutionContext.cs`
+建议继续检查：
+
+- provider type 与 base URL 是否匹配
+- OpenAI / OpenAICompatible / AzureOpenAI 的 runtime 映射是否一致
+- 当前实际 provider 是否支持同步 `/messages` 与流式 `/stream` 两条路径
+
+### 5.2 Agent 执行本地命令能力设计
+
+用户已经提出希望让 agent 可以执行本地命令，当前还**未实现**。建议按现有 tool 架构做，不要直接开放裸 shell。
+
+建议方案：
+
+- 新增受控工具，例如：`run_local_command`
+- 通过现有 Agent tools 选择机制挂入 Studio
+- 限制：
+  - 命令白名单
+  - 工作目录白名单
+  - 超时
+  - 输出长度截断
+  - 默认禁止危险命令
+- 返回结构化结果：
+  - `exitCode`
+  - `stdout`
+  - `stderr`
+  - `durationMs`
+  - `timedOut`
+
+最小落地顺序建议：
+
+1. 先做只读/低风险命令白名单版
+2. 再考虑人工确认、审计日志和更高权限命令
+
+---
+
+## 6. 关键文件清单
+
+- `SESSION_HANDOFF.md`
 - `src/AgileAI.Extensions.FileSystem/FileSystemToolRegistryFactory.cs`
-- `src/AgileAI.Extensions.FileSystem/DeleteFileTool.cs`
-- `src/AgileAI.Extensions.FileSystem/DeleteDirectoryTool.cs`
-- `src/AgileAI.Extensions.FileSystem/MoveFileTool.cs`
-- `src/AgileAI.Extensions.FileSystem/PatchFileTool.cs`
-
-### 前端
-
-- `studio-web/playwright.config.ts`
+- `src/AgileAI.Studio.Api/Contracts/Models.cs`
+- `src/AgileAI.Studio.Api/Data/StudioDbContext.cs`
+- `src/AgileAI.Studio.Api/Domain/AgentToolSelection.cs`
+- `src/AgileAI.Studio.Api/Infrastructure/StudioDbSeeder.cs`
+- `src/AgileAI.Studio.Api/Program.cs`
+- `src/AgileAI.Studio.Api/Services/AgentExecutionService.cs`
+- `src/AgileAI.Studio.Api/Services/AgentService.cs`
+- `src/AgileAI.Studio.Api/Services/ConversationService.cs`
+- `src/AgileAI.Studio.Api/Services/ModelCatalogService.cs`
+- `studio-web/package.json`
+- `studio-web/package-lock.json`
 - `studio-web/src/api/studio.ts`
-- `studio-web/src/components/StudioShell.vue`
-- `studio-web/src/router.ts`
+- `studio-web/src/stores/studio.ts`
 - `studio-web/src/styles.css`
+- `studio-web/src/types.ts`
 - `studio-web/src/views/AgentsPage.vue`
 - `studio-web/src/views/ChatPage.vue`
-- `studio-web/src/views/DashboardPage.vue`
 - `studio-web/src/views/ModelsPage.vue`
 - `studio-web/tests/studio.spec.ts`
 
 ---
 
 **交接人**: Sisyphus  
-**日期**: 2026-03-26
+**日期**: 2026-03-29

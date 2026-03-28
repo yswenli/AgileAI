@@ -32,7 +32,12 @@ public record AgentRequestDto(
     double Temperature,
     int MaxTokens,
     bool EnableSkills,
-    bool IsPinned);
+    bool IsPinned,
+    IReadOnlyList<string>? SelectedToolNames);
+
+public record ToolOptionDto(
+    string Name,
+    string? Description);
 
 public record ConversationCreateRequest(Guid AgentId, string? Title);
 
@@ -78,6 +83,7 @@ public record AgentDto(
     int MaxTokens,
     bool EnableSkills,
     bool IsPinned,
+    IReadOnlyList<string> SelectedToolNames,
     string ModelDisplayName,
     string RuntimeModelId,
     DateTimeOffset CreatedAtUtc,
