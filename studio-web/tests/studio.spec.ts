@@ -3,9 +3,9 @@ import { expect, test } from '@playwright/test'
 const realProviderName = `PW Real Provider ${Date.now()}`
 const realModelName = `PW Real Model ${Date.now()}`
 const realAgentName = `PW Real Agent ${Date.now()}`
-const realEndpoint = 'http://192.168.0.126:8317'
-const realApiKey = 'your-api-key-3'
-const realModelKey = 'gpt-5.4'
+const realEndpoint = process.env.PW_REAL_ENDPOINT ?? ''
+const realApiKey = process.env.PW_REAL_API_KEY ?? ''
+const realModelKey = process.env.PW_REAL_MODEL_KEY ?? ''
 
 test('shell navigation is streamlined and root redirects to models', async ({ page }) => {
   await page.goto('/')
@@ -126,6 +126,7 @@ test('agent create and edit can configure selected tools with default all checke
 })
 
 test('real provider flow can create provider model agent and send a chat message', async ({ page }) => {
+  test.skip(!realEndpoint || !realApiKey || !realModelKey, 'Real provider test requires PW_REAL_ENDPOINT, PW_REAL_API_KEY, and PW_REAL_MODEL_KEY.')
   test.setTimeout(120_000)
 
   await page.goto('/models')
@@ -173,4 +174,53 @@ test('real provider flow can create provider model agent and send a chat message
   await page.getByTestId('chat-input').locator('textarea').fill('Reply with exactly: Playwright real chat ok')
   await page.getByTestId('send-message').click()
   await expect(page.getByTestId('message-assistant').filter({ hasText: /Playwright real chat ok/i }).last()).toBeVisible({ timeout: 90000 })
+})
+
+test('mock provider chat can require command approval and resolve it from the approval card', async ({ page }) => {
+  test.setTimeout(90_000)
+
+  const approvalAgentName = `PW Approval Agent ${Date.now()}`
+
+  await page.goto('/agents')
+  await page.getByTestId('create-agent').click()
+  await expect(page.locator('.agent-modal-shell .n-base-selection')).toBeVisible()
+  await expect(page.locator('.agent-modal-shell .n-base-selection .n-base-selection-label')).not.toContainText('loading', { timeout: 30_000 })
+  await page.getByTestId('agent-name-input').locator('input').fill(approvalAgentName)
+  await page.getByTestId('agent-description-input').locator('textarea').fill('Playwright approval flow agent.')
+  await page.locator('.agent-modal-shell .n-base-selection').click()
+  await page.locator('.n-base-select-menu .n-base-select-option').filter({ hasNotText: 'PW Real Model' }).first().click()
+  await page.getByTestId('agent-prompt-input').locator('textarea').fill('Use tools when necessary.')
+  await page.getByTestId('save-agent').click()
+  await expect(page.locator('.agent-card', { hasText: approvalAgentName }).first()).toBeVisible()
+
+  await page.locator('.agent-card', { hasText: approvalAgentName }).click()
+  await page.waitForURL(/\/chat\?agentId=/)
+  await expect(page.getByTestId('chat-input')).toBeVisible()
+
+  await page.getByTestId('chat-input').locator('textarea').fill('Please run local command approval test')
+  await page.getByTestId('send-message').click()
+
+  const approvalModal = page.getByTestId('approval-modal')
+  await expect(approvalModal).toBeVisible({ timeout: 30_000 })
+  await expect(approvalModal).toContainText('run_local_command')
+  await expect(approvalModal).toContainText(/shell:\s+(auto|bash|sh|pwsh|cmd)/i)
+  await page.getByTestId('approval-auto-approve').click()
+
+  await approvalModal.locator('[data-testid^="approval-approve-"]').click()
+
+  const assistantBubble = page.locator('[data-testid="message-assistant"]').last()
+  await expect(assistantBubble).toContainText(/local command/i, { timeout: 30_000 })
+  await expect(assistantBubble).toContainText(/successfully/i, { timeout: 30_000 })
+  await expect(assistantBubble).toContainText(/local[ -]command[ -]approval[ -]test/i, { timeout: 30_000 })
+  await expect(assistantBubble.locator('[data-testid^="tool-history-"]').last()).toContainText('run_local_command')
+
+  await page.getByTestId('chat-input').locator('textarea').fill('Please run local command approval test again')
+  await page.getByTestId('send-message').click()
+
+  await expect(page.getByTestId('approval-modal')).toBeHidden({ timeout: 10_000 })
+
+  const latestAssistantBubble = page.locator('[data-testid="message-assistant"]').last()
+  await expect(latestAssistantBubble).toContainText(/local command/i, { timeout: 30_000 })
+  await expect(latestAssistantBubble).toContainText(/successfully/i, { timeout: 30_000 })
+  await expect(latestAssistantBubble.locator('[data-testid^="tool-history-"]').last()).toContainText('run_local_command')
 })
