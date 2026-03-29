@@ -1,5 +1,5 @@
 import { http } from './http'
-import type { AgentItem, ChatStreamStart, ConversationItem, MessageItem, ModelItem, Overview, ProviderConnection, ToolOption } from '../types'
+import type { AgentItem, ChatStreamStart, ConversationItem, MessageItem, ModelItem, Overview, ProviderConnection, ToolApprovalItem, ToolApprovalResolutionResult, ToolOption } from '../types'
 
 const messageRoleMap = [undefined, 'System', 'User', 'Assistant', 'Tool'] as const
 const providerTypeMap = ['OpenAI', 'OpenAI', 'OpenAICompatible', 'AzureOpenAI'] as const
@@ -179,12 +179,26 @@ export async function sendMessage(conversationId: string, content: string) {
   }
 }
 
+export async function getConversationToolApprovals(conversationId: string) {
+  const { data } = await http.get<ToolApprovalItem[]>(`/conversations/${conversationId}/tool-approvals`)
+  return data
+}
+
+export async function resolveToolApproval(approvalId: string, approved: boolean, comment?: string) {
+  const { data } = await http.post<ToolApprovalResolutionResult>(`/tool-approvals/${approvalId}/resolve`, { approved, comment })
+  return {
+    ...data,
+    assistantMessage: normalizeMessage(data.assistantMessage as MessageItem & { role: MessageItem['role'] | number | string }),
+  }
+}
+
 export interface StreamHandlers {
   onStart?: (payload: ChatStreamStart) => void
   onDelta?: (delta: string) => void
   onUsage?: (payload: { inputTokens?: number | null; outputTokens?: number | null }) => void
   onCompleted?: (payload: { finishReason?: string | null }) => void
   onFinalMessage?: (payload: { content: string; finishReason?: string | null; inputTokens?: number | null; outputTokens?: number | null }) => void
+  onApprovalRequired?: (payload: ToolApprovalItem) => void
   onError?: (message: string) => void
 }
 
@@ -244,6 +258,9 @@ export async function streamMessage(conversationId: string, content: string, han
         break
       case 'final-message':
         handlers.onFinalMessage?.(payload)
+        break
+      case 'approval-required':
+        handlers.onApprovalRequired?.(payload as ToolApprovalItem)
         break
       case 'error':
         handlers.onError?.(payload.message ?? 'Streaming failed')

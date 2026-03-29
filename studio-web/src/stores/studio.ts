@@ -10,10 +10,12 @@ import {
   getAgents,
   getAgentTools,
   getConversations,
+  getConversationToolApprovals,
   getMessages,
   getModels,
   getOverview,
   getProviderConnections,
+  resolveToolApproval,
   sendMessage,
   streamMessage,
   testModel,
@@ -24,7 +26,7 @@ import {
   type ModelPayload,
   type ProviderConnectionPayload,
 } from '../api/studio'
-import type { AgentItem, ConversationItem, MessageItem, ModelItem, Overview, ProviderConnection, ToolOption } from '../types'
+import type { AgentItem, ConversationItem, MessageItem, ModelItem, Overview, ProviderConnection, ToolApprovalItem, ToolOption } from '../types'
 
 export const useStudioStore = defineStore('studio', {
   state: () => ({
@@ -35,10 +37,13 @@ export const useStudioStore = defineStore('studio', {
     agentTools: [] as ToolOption[],
     conversations: [] as ConversationItem[],
     messagesByConversation: {} as Record<string, MessageItem[]>,
+    toolApprovalsByConversation: {} as Record<string, ToolApprovalItem[]>,
+    autoApproveToolCallsByConversation: {} as Record<string, boolean>,
     activeConversationId: '' as string,
     isLoading: false,
     isStreaming: false,
     streamError: '' as string,
+    resolvingApprovalIds: [] as string[],
     deletingProviderIds: [] as string[],
     deletingModelIds: [] as string[],
     deletingAgentIds: [] as string[],
@@ -50,6 +55,9 @@ export const useStudioStore = defineStore('studio', {
     },
     activeMessages(state) {
       return state.messagesByConversation[state.activeConversationId] ?? []
+    },
+    activeToolApprovals(state) {
+      return state.toolApprovalsByConversation[state.activeConversationId] ?? []
     },
   },
   actions: {
@@ -159,10 +167,54 @@ export const useStudioStore = defineStore('studio', {
       return item
     },
     async fetchMessages(conversationId: string) {
-      const items = await getMessages(conversationId)
+      const [items, approvals] = await Promise.all([
+        getMessages(conversationId),
+        getConversationToolApprovals(conversationId),
+      ])
       this.messagesByConversation[conversationId] = items
+      this.toolApprovalsByConversation[conversationId] = approvals
       this.activeConversationId = conversationId
       return items
+    },
+    setAutoApproveToolCallsForConversation(conversationId: string, enabled: boolean) {
+      this.autoApproveToolCallsByConversation = {
+        ...this.autoApproveToolCallsByConversation,
+        [conversationId]: enabled,
+      }
+    },
+    async resolveToolApprovalAction(approvalId: string, approved: boolean, comment?: string) {
+      this.resolvingApprovalIds = [...this.resolvingApprovalIds, approvalId]
+      try {
+        const result = await resolveToolApproval(approvalId, approved, comment)
+        const conversationId = result.approval.conversationId
+        const approvals = this.toolApprovalsByConversation[conversationId] ?? []
+        const updatedApprovals = approvals.map((item) =>
+          item.id === approvalId ? result.approval : item,
+        )
+
+        this.toolApprovalsByConversation[conversationId] = result.pendingApproval
+          ? updatedApprovals.some((item) => item.id === result.pendingApproval?.id)
+            ? updatedApprovals.map((item) => item.id === result.pendingApproval?.id ? result.pendingApproval : item)
+            : [...updatedApprovals, result.pendingApproval]
+          : updatedApprovals
+
+        const messages = [...(this.messagesByConversation[conversationId] ?? [])]
+        const index = messages.findIndex((item) => item.id === result.assistantMessage.id)
+        if (index >= 0) {
+          messages[index] = result.assistantMessage
+        } else {
+          messages.push(result.assistantMessage)
+        }
+
+        this.messagesByConversation[conversationId] = messages
+        this.conversations = this.conversations.map((item) =>
+          item.id === conversationId ? result.conversation : item,
+        )
+        await this.refreshOverview()
+        return result
+      } finally {
+        this.resolvingApprovalIds = this.resolvingApprovalIds.filter((item) => item !== approvalId)
+      }
     },
     async sendMessage(conversationId: string, content: string) {
       const result = await sendMessage(conversationId, content)
@@ -271,6 +323,21 @@ export const useStudioStore = defineStore('studio', {
               isStreaming: false,
             }
             this.messagesByConversation[conversationId] = list
+          },
+          onApprovalRequired: (approval) => {
+            const approvals = this.toolApprovalsByConversation[conversationId] ?? []
+            const index = approvals.findIndex((item) => item.id === approval.id)
+            if (index >= 0) {
+              const next = [...approvals]
+              next[index] = approval
+              this.toolApprovalsByConversation[conversationId] = next
+            } else {
+              this.toolApprovalsByConversation[conversationId] = [...approvals, approval]
+            }
+
+            if (this.autoApproveToolCallsByConversation[conversationId]) {
+              void this.resolveToolApprovalAction(approval.id, true, 'Auto-approved for this session.')
+            }
           },
           onError: (message) => {
             this.streamError = message

@@ -84,6 +84,34 @@ export interface ChatStreamStart {
   assistantMessage: MessageItem
 }
 
+export type ToolApprovalStatus = 'Pending' | 'Approved' | 'Denied' | 'Completed' | 'Failed'
+
+export interface ToolApprovalItem {
+  id: string
+  conversationId: string
+  assistantMessageId: string
+  approvalRequestId: string
+  toolCallId: string
+  toolName: string
+  argumentsJson: string
+  status: ToolApprovalStatus
+  decisionComment?: string | null
+  resultContent?: string | null
+  exitCode?: number | null
+  standardOutput?: string | null
+  standardError?: string | null
+  requestedAtUtc: string
+  decidedAtUtc?: string | null
+  completedAtUtc?: string | null
+}
+
+export interface ToolApprovalResolutionResult {
+  approval: ToolApprovalItem
+  assistantMessage: MessageItem
+  conversation: ConversationItem
+  pendingApproval?: ToolApprovalItem | null
+}
+
 export interface Overview {
   modelCount: number
   agentCount: number
