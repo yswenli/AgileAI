@@ -190,4 +190,137 @@ public class ChatSessionTests
         Assert.True(response.IsSuccess);
         mockChatClient.Verify(c => c.CompleteAsync(It.IsAny<ChatRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(maxIterations));
     }
+
+    [Fact]
+    public async Task SendTurnAsync_WithApprovalRequired_ShouldReturnPendingApprovalWithoutExecutingTool()
+    {
+        var toolCall = new ToolCall { Id = "call-approval", Name = "approval-tool", Arguments = "{}" };
+        var mockChatClient = new Mock<IChatClient>();
+        mockChatClient.Setup(c => c.CompleteAsync(It.IsAny<ChatRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ChatResponse
+            {
+                IsSuccess = true,
+                Message = new ChatMessage
+                {
+                    Role = ChatRole.Assistant,
+                    TextContent = "Need to run a gated tool.",
+                    ToolCalls = [toolCall]
+                }
+            });
+
+        var tool = new ApprovalAwareTestTool("approval-tool", "approved-result");
+        var registry = new InMemoryToolRegistry();
+        registry.Register(tool);
+
+        var session = new ChatSession(
+            mockChatClient.Object,
+            "test-model",
+            registry,
+            toolExecutionGate: new PendingExecutionGate());
+
+        var result = await session.SendTurnAsync("hello");
+
+        Assert.NotNull(result.PendingApprovalRequest);
+        Assert.Equal("approval-tool", result.PendingApprovalRequest!.ToolName);
+        Assert.Equal(0, tool.ExecutionCount);
+        Assert.Equal(2, session.History.Count);
+        Assert.Equal(ChatRole.Assistant, session.History[1].Role);
+    }
+
+    [Fact]
+    public async Task ContinueAsync_AfterApprovedToolResult_ShouldResumeLoopAndSupportAnotherPendingApproval()
+    {
+        var firstToolCall = new ToolCall { Id = "call-1", Name = "approval-tool", Arguments = "{}" };
+        var secondToolCall = new ToolCall { Id = "call-2", Name = "approval-tool", Arguments = "{}" };
+        var mockChatClient = new Mock<IChatClient>();
+        mockChatClient.SetupSequence(c => c.CompleteAsync(It.IsAny<ChatRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ChatResponse
+            {
+                IsSuccess = true,
+                Message = new ChatMessage
+                {
+                    Role = ChatRole.Assistant,
+                    TextContent = "Need first approval.",
+                    ToolCalls = [firstToolCall]
+                }
+            })
+            .ReturnsAsync(new ChatResponse
+            {
+                IsSuccess = true,
+                Message = new ChatMessage
+                {
+                    Role = ChatRole.Assistant,
+                    TextContent = "Need second approval.",
+                    ToolCalls = [secondToolCall]
+                }
+            });
+
+        var tool = new ApprovalAwareTestTool("approval-tool", "approved-result");
+        var registry = new InMemoryToolRegistry();
+        registry.Register(tool);
+        var gate = new SequenceExecutionGate(
+            ToolApprovalDecision.PendingDecision("approval-1"),
+            ToolApprovalDecision.PendingDecision("approval-2"));
+
+        var session = new ChatSession(mockChatClient.Object, "test-model", registry, toolExecutionGate: gate);
+
+        var initialTurn = await session.SendTurnAsync("start");
+        Assert.NotNull(initialTurn.PendingApprovalRequest);
+
+        session.AddMessage(new ChatMessage
+        {
+            Role = ChatRole.Tool,
+            ToolCallId = firstToolCall.Id,
+            TextContent = "approved-result"
+        });
+
+        var continuedTurn = await session.ContinueAsync();
+
+        Assert.NotNull(continuedTurn.PendingApprovalRequest);
+        Assert.Equal(secondToolCall.Id, continuedTurn.PendingApprovalRequest!.ToolCallId);
+        Assert.Equal(0, tool.ExecutionCount);
+        mockChatClient.Verify(c => c.CompleteAsync(It.IsAny<ChatRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    private sealed class ApprovalAwareTestTool(string name, string resultContent) : ITool, IApprovalAwareTool
+    {
+        public string Name => name;
+        public string? Description => "approval-aware test tool";
+        public object? ParametersSchema => new { };
+        public ToolApprovalMode ApprovalMode => ToolApprovalMode.PerExecution;
+        public int ExecutionCount { get; private set; }
+
+        public Task<ToolResult> ExecuteAsync(ToolExecutionContext context, CancellationToken cancellationToken = default)
+        {
+            ExecutionCount++;
+            return Task.FromResult(new ToolResult
+            {
+                ToolCallId = context.ToolCall.Id,
+                Content = resultContent,
+                IsSuccess = true
+            });
+        }
+    }
+
+    private sealed class PendingExecutionGate : IToolExecutionGate
+    {
+        public Task<ToolApprovalDecision> EvaluateAsync(ToolApprovalRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(ToolApprovalDecision.PendingDecision(request.Id));
+    }
+
+    private sealed class SequenceExecutionGate(params ToolApprovalDecision[] decisions) : IToolExecutionGate
+    {
+        private readonly Queue<ToolApprovalDecision> _decisions = new(decisions);
+
+        public Task<ToolApprovalDecision> EvaluateAsync(ToolApprovalRequest request, CancellationToken cancellationToken = default)
+        {
+            var decision = _decisions.Count > 0
+                ? _decisions.Dequeue()
+                : ToolApprovalDecision.ApprovedDecision(request.Id);
+            return Task.FromResult(decision with
+            {
+                ApprovalRequestId = string.IsNullOrWhiteSpace(decision.ApprovalRequestId) ? request.Id : decision.ApprovalRequestId
+            });
+        }
+    }
 }

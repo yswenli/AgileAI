@@ -10,8 +10,12 @@ public class ChatSession : IChatSession
     private readonly List<ChatMessage> _history = new();
     private readonly IToolRegistry? _toolRegistry;
     private readonly int _maxToolLoopIterations;
+    private readonly IToolExecutionGate _toolExecutionGate;
+    private readonly string? _sessionId;
+    private readonly string? _conversationId;
     private readonly IServiceProvider? _serviceProvider;
     private readonly ILogger<ChatSession>? _logger;
+    private readonly ToolExecutor _toolExecutor;
 
     public IReadOnlyList<ChatMessage> History => _history.AsReadOnly();
 
@@ -20,6 +24,9 @@ public class ChatSession : IChatSession
         string modelId,
         IToolRegistry? toolRegistry = null,
         int maxToolLoopIterations = 5,
+        IToolExecutionGate? toolExecutionGate = null,
+        string? sessionId = null,
+        string? conversationId = null,
         IServiceProvider? serviceProvider = null,
         ILogger<ChatSession>? logger = null)
     {
@@ -27,8 +34,12 @@ public class ChatSession : IChatSession
         _modelId = modelId;
         _toolRegistry = toolRegistry;
         _maxToolLoopIterations = maxToolLoopIterations;
+        _toolExecutionGate = toolExecutionGate ?? new AutoApproveToolExecutionGate();
+        _sessionId = sessionId;
+        _conversationId = conversationId;
         _serviceProvider = serviceProvider;
         _logger = logger;
+        _toolExecutor = new ToolExecutor(_toolExecutionGate, serviceProvider?.GetService(typeof(ILogger<ToolExecutor>)) as ILogger<ToolExecutor>);
     }
 
     public void AddMessage(ChatMessage message)
@@ -43,8 +54,21 @@ public class ChatSession : IChatSession
 
     public async Task<ChatResponse> SendAsync(string message, ChatOptions? options = null, CancellationToken cancellationToken = default)
     {
+        var result = await SendTurnAsync(message, options, cancellationToken);
+        return result.Response;
+    }
+
+    public Task<ChatTurnResult> ContinueAsync(ChatOptions? options = null, CancellationToken cancellationToken = default)
+        => ExecuteTurnLoopAsync(options, cancellationToken);
+
+    public async Task<ChatTurnResult> SendTurnAsync(string message, ChatOptions? options = null, CancellationToken cancellationToken = default)
+    {
         AddMessage(ChatMessage.User(message));
-        
+        return await ExecuteTurnLoopAsync(options, cancellationToken);
+    }
+
+    private async Task<ChatTurnResult> ExecuteTurnLoopAsync(ChatOptions? options, CancellationToken cancellationToken)
+    {
         var finalOptions = options ?? new ChatOptions();
         if (_toolRegistry != null)
         {
@@ -59,6 +83,7 @@ public class ChatSession : IChatSession
         }
 
         ChatResponse? lastResponse = null;
+        List<ToolResult>? lastToolResults = null;
         var iteration = 0;
 
         while (iteration < _maxToolLoopIterations)
@@ -77,7 +102,7 @@ public class ChatSession : IChatSession
             if (!lastResponse.IsSuccess)
             {
                 _logger?.LogError("ChatSession request failed: {ErrorMessage}", lastResponse.ErrorMessage);
-                return lastResponse;
+                return new ChatTurnResult { Response = lastResponse };
             }
 
             if (lastResponse.Message != null)
@@ -99,26 +124,26 @@ public class ChatSession : IChatSession
                 _logger?.LogInformation("Executing tool: {ToolName}", toolCall.Name);
                 if (_toolRegistry.TryGetTool(toolCall.Name, out var tool) && tool != null)
                 {
-                    try
+                    var context = new ToolExecutionContext
                     {
-                        var context = new ToolExecutionContext
+                        ToolCall = toolCall,
+                        ChatHistory = _history.AsReadOnly(),
+                        ServiceProvider = _serviceProvider,
+                        SessionId = _sessionId,
+                        ConversationId = _conversationId
+                    };
+                    var execution = await _toolExecutor.ExecuteAsync(tool, context, cancellationToken);
+                    toolResults.Add(execution.Result);
+
+                    if (execution.PendingApprovalRequest != null)
+                    {
+                        lastToolResults = toolResults;
+                        return new ChatTurnResult
                         {
-                            ToolCall = toolCall,
-                            ChatHistory = _history.AsReadOnly(),
-                            ServiceProvider = _serviceProvider
+                            Response = lastResponse,
+                            ToolResults = lastToolResults,
+                            PendingApprovalRequest = execution.PendingApprovalRequest
                         };
-                        var result = await tool.ExecuteAsync(context, cancellationToken);
-                        toolResults.Add(result);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger?.LogError(ex, "Error executing tool '{ToolName}'", toolCall.Name);
-                        toolResults.Add(new ToolResult
-                        {
-                            ToolCallId = toolCall.Id,
-                            Content = $"Error executing tool '{toolCall.Name}': {ex.Message}",
-                            IsSuccess = false
-                        });
                     }
                 }
                 else
@@ -128,10 +153,13 @@ public class ChatSession : IChatSession
                     {
                         ToolCallId = toolCall.Id,
                         Content = $"Tool '{toolCall.Name}' not found",
-                        IsSuccess = false
+                        IsSuccess = false,
+                        Status = ToolExecutionStatus.Failed
                     });
                 }
             }
+
+            lastToolResults = toolResults;
 
             foreach (var result in toolResults)
             {
@@ -146,10 +174,14 @@ public class ChatSession : IChatSession
             iteration++;
         }
 
-        return lastResponse ?? new ChatResponse
+        return new ChatTurnResult
         {
-            IsSuccess = false,
-            ErrorMessage = "No response received"
+            Response = lastResponse ?? new ChatResponse
+            {
+                IsSuccess = false,
+                ErrorMessage = "No response received"
+            },
+            ToolResults = lastToolResults
         };
     }
 }

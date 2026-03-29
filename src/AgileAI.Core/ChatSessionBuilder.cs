@@ -10,6 +10,9 @@ public class ChatSessionBuilder(IChatClient chatClient, string modelId)
     private IServiceProvider? _serviceProvider;
     private ILogger<ChatSession>? _logger;
     private IReadOnlyList<ChatMessage> _history = [];
+    private IToolExecutionGate? _toolExecutionGate;
+    private string? _sessionId;
+    private string? _conversationId;
 
     public ChatSessionBuilder WithToolRegistry(IToolRegistry? toolRegistry)
     {
@@ -35,6 +38,24 @@ public class ChatSessionBuilder(IChatClient chatClient, string modelId)
         return this;
     }
 
+    public ChatSessionBuilder WithToolExecutionGate(IToolExecutionGate? toolExecutionGate)
+    {
+        _toolExecutionGate = toolExecutionGate;
+        return this;
+    }
+
+    public ChatSessionBuilder WithSessionId(string? sessionId)
+    {
+        _sessionId = sessionId;
+        return this;
+    }
+
+    public ChatSessionBuilder WithConversationId(string? conversationId)
+    {
+        _conversationId = conversationId;
+        return this;
+    }
+
     public ChatSessionBuilder WithHistory(IEnumerable<ChatMessage> history)
     {
         _history = history.ToList();
@@ -48,6 +69,9 @@ public class ChatSessionBuilder(IChatClient chatClient, string modelId)
             modelId,
             _toolRegistry,
             _maxToolLoopIterations,
+            _toolExecutionGate,
+            _sessionId,
+            _conversationId,
             _serviceProvider,
             _logger);
 
