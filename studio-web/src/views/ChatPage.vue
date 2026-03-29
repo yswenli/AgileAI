@@ -15,7 +15,40 @@
         <div v-if="activeMessages.length" ref="transcriptRef" class="message-stack" data-testid="chat-transcript">
           <article v-for="item in activeMessages" :key="item.id" class="message-bubble" :class="item.role.toLowerCase()" :data-testid="`message-${item.role.toLowerCase()}`">
             <span class="message-role">{{ item.role === 'User' ? 'You' : item.role === 'Assistant' ? activeConversation?.agentName ?? 'Assistant' : item.role }}</span>
-            <div v-if="item.role === 'Assistant'" class="message-markdown" v-html="renderAssistantMessage(item.content)"></div>
+            <div v-if="item.role === 'Assistant'">
+              <div class="message-markdown" v-html="renderAssistantMessage(item.content)"></div>
+              <div v-if="getToolHistoryForMessage(item.id).length" class="message-tool-history">
+                <n-collapse accordion>
+                  <n-collapse-item
+                    v-for="tool in getToolHistoryForMessage(item.id)"
+                    :key="tool.id"
+                    :name="tool.id"
+                    :title="tool.toolName"
+                    :data-testid="`tool-history-${tool.id}`"
+                  >
+                    <template #header>
+                      <div class="tool-history-header">
+                        <span class="tool-history-name">{{ tool.toolName }}</span>
+                        <n-tag
+                          size="small"
+                          :type="tool.status === 'Completed' ? 'success' : tool.status === 'Denied' ? 'error' : tool.status === 'Failed' ? 'error' : 'default'"
+                        >
+                          {{ tool.status }}
+                        </n-tag>
+                      </div>
+                    </template>
+                    <div class="tool-history-content">
+                      <div class="tool-history-label">Command</div>
+                      <pre class="approval-command tool-history-preview">{{ extractCommandPreview(tool.argumentsJson) }}</pre>
+                      <div v-if="tool.resultContent" class="tool-history-result">
+                        <div class="tool-history-label">Details</div>
+                        <pre class="approval-command tool-history-preview result-preview">{{ tool.resultContent }}</pre>
+                      </div>
+                    </div>
+                  </n-collapse-item>
+                </n-collapse>
+              </div>
+            </div>
             <p v-else>{{ item.content }}</p>
             <div v-if="item.role === 'Assistant'" class="message-meta">
               <span v-if="item.inputTokens || item.outputTokens">{{ item.inputTokens ?? 0 }} in · {{ item.outputTokens ?? 0 }} out</span>
@@ -40,7 +73,7 @@
               <span v-if="store.streamError">{{ store.streamError }}</span>
             </p>
             <div class="chat-send-row">
-              <n-button class="chat-send-button" type="primary" :loading="isSending" data-testid="send-message" @click="submitPrompt">Send</n-button>
+              <n-button class="chat-send-button" type="primary" :loading="isSending" :disabled="Boolean(pendingApproval)" data-testid="send-message" @click="submitPrompt">Send</n-button>
             </div>
           </div>
         </div>
@@ -73,13 +106,66 @@
         </div>
       </n-card>
     </div>
+
+    <n-modal
+      :show="Boolean(pendingApproval)"
+      :mask-closable="false"
+      :close-on-esc="false"
+      :auto-focus="false"
+      :trap-focus="true"
+    >
+      <n-card
+        v-if="pendingApproval"
+        class="glass-card approval-modal-card"
+        title="Approval Required"
+        :bordered="false"
+        size="huge"
+        role="dialog"
+        aria-modal="true"
+        data-testid="approval-modal"
+      >
+        <div class="approval-header approval-modal-header">
+          <strong>{{ pendingApproval.toolName }}</strong>
+          <n-tag type="warning" size="small">Pending</n-tag>
+        </div>
+        <p class="approval-warning">This command will execute on your machine with local shell access.</p>
+        <pre class="approval-command">{{ extractCommandPreview(pendingApproval.argumentsJson) }}</pre>
+        <n-checkbox v-model:checked="alwaysApproveInSession" data-testid="approval-auto-approve">
+          Always approve tool calls in this session
+        </n-checkbox>
+        <p v-if="pendingApproval.decisionComment" class="approval-comment">{{ pendingApproval.decisionComment }}</p>
+        <template #action>
+          <div class="approval-actions">
+            <n-button
+              size="small"
+              type="error"
+              secondary
+              :loading="store.resolvingApprovalIds.includes(pendingApproval.id)"
+              :data-testid="`approval-reject-${pendingApproval.id}`"
+              @click="resolveApproval(pendingApproval.id, false)"
+            >
+              Reject
+            </n-button>
+            <n-button
+              size="small"
+              type="primary"
+              :loading="store.resolvingApprovalIds.includes(pendingApproval.id)"
+              :data-testid="`approval-approve-${pendingApproval.id}`"
+              @click="resolveApproval(pendingApproval.id, true)"
+            >
+              Approve
+            </n-button>
+          </div>
+        </template>
+      </n-card>
+    </n-modal>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { useMessage, NButton, NCard, NEmpty, NInput, NSpin, NTag } from 'naive-ui'
+import { useMessage, NButton, NCard, NCheckbox, NCollapse, NCollapseItem, NEmpty, NInput, NModal, NSpin, NTag } from 'naive-ui'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import { useStudioStore } from '../stores/studio'
@@ -92,9 +178,12 @@ const prompt = ref('')
 const selectedAgentId = ref('')
 const isSending = ref(false)
 const transcriptRef = ref<HTMLElement | null>(null)
+const alwaysApproveInSession = ref(false)
 
 const activeConversation = computed(() => store.activeConversation)
 const activeMessages = computed(() => store.activeMessages)
+const activeToolApprovals = computed(() => store.activeToolApprovals)
+const pendingApproval = computed(() => activeToolApprovals.value.find((item) => item.status === 'Pending') ?? null)
 
 marked.setOptions({
   breaks: true,
@@ -234,6 +323,59 @@ async function selectConversation(id: string) {
   await store.fetchMessages(id)
 }
 
+function extractCommandPreview(argumentsJson: string) {
+  try {
+    const parsed = JSON.parse(argumentsJson) as { command?: string; workingDirectory?: string; shell?: string; timeoutMs?: number }
+    const parts = [parsed.command ?? argumentsJson]
+    if (parsed.workingDirectory) {
+      parts.push(`cwd: ${parsed.workingDirectory}`)
+    }
+    if (parsed.shell) {
+      parts.push(`shell: ${parsed.shell}`)
+    }
+    if (parsed.timeoutMs) {
+      parts.push(`timeout: ${parsed.timeoutMs}ms`)
+    }
+    return parts.join('\n')
+  } catch {
+    return argumentsJson
+  }
+}
+
+function getToolHistoryForMessage(messageId: string) {
+  return activeToolApprovals.value.filter((item) => item.assistantMessageId === messageId)
+}
+
+async function resolveApproval(approvalId: string, approved: boolean) {
+  try {
+    const conversationId = pendingApproval.value?.conversationId ?? store.activeConversationId
+    if (approved && conversationId && alwaysApproveInSession.value) {
+      store.setAutoApproveToolCallsForConversation(conversationId, true)
+    }
+
+    await store.resolveToolApprovalAction(approvalId, approved)
+    message.success(approved ? 'Command approved' : 'Command rejected')
+    if (!approved) {
+      alwaysApproveInSession.value = false
+    }
+  } catch (error) {
+    message.error((error as Error).message)
+  }
+}
+
+watch(
+  pendingApproval,
+  (approval) => {
+    if (!approval) {
+      alwaysApproveInSession.value = false
+      return
+    }
+
+    alwaysApproveInSession.value = Boolean(store.autoApproveToolCallsByConversation[approval.conversationId])
+  },
+  { immediate: true },
+)
+
 async function submitPrompt() {
   const content = prompt.value.trim()
 
@@ -243,6 +385,11 @@ async function submitPrompt() {
 
   if (!selectedAgentId.value) {
     message.warning('Select an agent first')
+    return
+  }
+
+  if (pendingApproval.value) {
+    message.warning('Approve or reject the pending tool request before sending another message.')
     return
   }
 
@@ -317,6 +464,99 @@ function formatConversationMeta(conversation: { createdAtUtc: string; messageCou
 
 .chat-send-button {
   margin-left: auto;
+}
+
+.approval-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.approval-modal-card {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.approval-modal-header {
+  margin-bottom: 12px;
+}
+
+.approval-warning,
+.approval-comment {
+  margin: 0 0 10px;
+  color: var(--text-color-2);
+}
+
+.approval-command {
+  margin: 0 0 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.78);
+  color: #e2e8f0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.approval-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.message-tool-history {
+  margin-top: 14px;
+}
+
+.tool-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.tool-history-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.92em;
+}
+
+.tool-history-content {
+  padding-top: 4px;
+}
+
+.tool-history-label {
+  margin-bottom: 8px;
+  font-size: 0.84em;
+  color: var(--text-color-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tool-history-result {
+  margin-top: 12px;
+}
+
+.tool-history-preview {
+  margin-bottom: 0;
+  padding: 10px 12px;
+  font-size: 0.86em;
+}
+
+.result-preview {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.message-tool-history :deep(.n-collapse) {
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.message-tool-history :deep(.n-collapse-item__header) {
+  padding: 10px 0;
+}
+
+.message-tool-history :deep(.n-collapse-item__content-inner) {
+  padding: 0 0 12px;
 }
 
 .chat-heading-copy {
