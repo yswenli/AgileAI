@@ -1,6 +1,7 @@
 using AgileAI.Studio.Api.Data;
 using AgileAI.Studio.Api.Domain;
 using AgileAI.Studio.Api.Services;
+using AgileAI.Core;
 using AgileAI.Extensions.FileSystem;
 using AgileAI.Studio.Api.Tools;
 using Microsoft.Data.Sqlite;
@@ -98,7 +99,10 @@ public class ToolApprovalServiceTests
         await dbContext.SaveChangesAsync();
 
         var modelCatalogService = new ModelCatalogService(dbContext, new ProviderClientFactory(NullLoggerFactory.Instance));
-        var conversationService = new ConversationService(dbContext);
+        var skillRegistry = new InMemorySkillRegistry();
+        var sessionStore = new InMemorySessionStore();
+        var skillService = new SkillService(skillRegistry, sessionStore);
+        var conversationService = new ConversationService(dbContext, skillService);
         var fileSystemOptions = new FileSystemToolOptions
         {
             RootPath = "/tmp",
@@ -118,7 +122,7 @@ public class ToolApprovalServiceTests
             new DeleteDirectoryTool(pathGuard));
         var processExecutionService = new ProcessExecutionService();
         var studioRegistryFactory = new StudioToolRegistryFactory(fileSystemFactory, new RunLocalCommandTool(processExecutionService));
-        var agentService = new AgentService(dbContext, modelCatalogService, studioRegistryFactory);
+        var agentService = new AgentService(dbContext, modelCatalogService, studioRegistryFactory, skillRegistry);
         var toolApprovalService = new ToolApprovalService(
             dbContext,
             conversationService,

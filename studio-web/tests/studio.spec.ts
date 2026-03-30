@@ -224,3 +224,86 @@ test('mock provider chat can require command approval and resolve it from the ap
   await expect(latestAssistantBubble).toContainText(/successfully/i, { timeout: 30_000 })
   await expect(latestAssistantBubble.locator('[data-testid^="tool-history-"]').last()).toContainText('run_local_command')
 })
+
+test('agent allowed skills restrict which skill can become active', async ({ page, request }) => {
+  test.setTimeout(90_000)
+
+  const agentName = `PW Skill Allowlist Agent ${Date.now()}`
+  const providerName = `PW Skill Provider ${Date.now()}`
+  const modelName = `PW Skill Model ${Date.now()}`
+  let modelId = ''
+  let agentId = ''
+  const providerCreateResponse = await request.post('http://127.0.0.1:5117/api/provider-connections', {
+    data: {
+      name: providerName,
+      providerType: 1,
+      apiKey: 'demo-local',
+      baseUrl: 'mock://studio/v1/',
+      endpoint: null,
+      providerName: null,
+      relativePath: null,
+      apiKeyHeaderName: null,
+      authMode: null,
+      apiVersion: null,
+      isEnabled: true,
+    },
+  })
+  expect(providerCreateResponse.ok()).toBeTruthy()
+  const createdProvider = await providerCreateResponse.json()
+
+  const modelCreateResponse = await request.post('http://127.0.0.1:5117/api/models', {
+    data: {
+      providerConnectionId: createdProvider.id,
+      displayName: modelName,
+      modelKey: 'gpt-4o-mini',
+      supportsStreaming: true,
+      supportsTools: true,
+      supportsVision: false,
+      isEnabled: true,
+    },
+  })
+  expect(modelCreateResponse.ok()).toBeTruthy()
+  const createdModel = await modelCreateResponse.json()
+  modelId = createdModel.id
+  expect(modelId).toBeTruthy()
+
+  const agentCreateResponse = await request.post('http://127.0.0.1:5117/api/agents', {
+    data: {
+      studioModelId: modelId,
+      name: agentName,
+      description: 'Playwright skill allowlist agent.',
+      systemPrompt: 'Use skills when they match.',
+      temperature: 0.6,
+      maxTokens: 2048,
+      enableSkills: true,
+      isPinned: false,
+      selectedToolNames: [],
+      allowedSkillNames: ['repo-guide'],
+    },
+  })
+  expect(agentCreateResponse.ok()).toBeTruthy()
+  const createdAgent = await agentCreateResponse.json()
+  agentId = createdAgent.id
+
+  const conversationCreateResponse = await request.post('http://127.0.0.1:5117/api/conversations', {
+    data: {
+      agentId,
+      title: `PW Skill Conversation ${Date.now()}`,
+    },
+  })
+  expect(conversationCreateResponse.ok()).toBeTruthy()
+  await conversationCreateResponse.json()
+
+  await page.goto(`/chat?agentId=${agentId}`)
+  await page.waitForURL(/\/chat\?agentId=/)
+  await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 30_000 })
+
+  await page.getByTestId('chat-input').locator('textarea').fill('Please analyze the repository architecture and find implementation entry points')
+  await page.getByTestId('send-message').click()
+  await expect(page.getByTestId('active-skill-tag')).toContainText('repo-guide', { timeout: 30_000 })
+
+  await page.getByTestId('chat-input').locator('textarea').fill('Write release notes and a changelog summary for today\'s work')
+  await page.getByTestId('send-message').click()
+  await expect(page.getByTestId('active-skill-tag')).toContainText('repo-guide', { timeout: 30_000 })
+  await expect(page.getByTestId('active-skill-tag')).not.toContainText('release-note')
+})
