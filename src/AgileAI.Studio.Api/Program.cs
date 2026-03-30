@@ -1,10 +1,12 @@
 using AgileAI.Studio.Api.Contracts;
 using AgileAI.Studio.Api.Data;
+using AgileAI.Abstractions;
 using AgileAI.DependencyInjection;
 using AgileAI.Extensions.FileSystem;
 using AgileAI.Extensions.FileSystem.DependencyInjection;
 using AgileAI.Studio.Api.Infrastructure;
 using AgileAI.Studio.Api.Services;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -29,6 +31,7 @@ builder.Services.AddScoped<ModelCatalogService>();
 builder.Services.AddScoped<AgentService>();
 builder.Services.AddScoped<ConversationService>();
 builder.Services.AddScoped<AgentExecutionService>();
+builder.Services.AddScoped<SkillService>();
 builder.Services.AddScoped<ToolApprovalService>();
 builder.Services.AddScoped<StudioToolExecutionGate>();
 builder.Services.AddScoped<ProcessExecutionService>();
@@ -41,7 +44,7 @@ builder.Services.AddFileSystemTools(new FileSystemToolOptions
     MaxReadCharacters = 12000
 });
 
-var skillsRoot = Path.Combine(builder.Environment.ContentRootPath, "skills");
+var skillsRoot = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "..", "skills"));
 if (Directory.Exists(skillsRoot))
 {
     builder.Services.AddLocalSkills(options =>
@@ -49,6 +52,9 @@ if (Directory.Exists(skillsRoot))
         options.RootDirectory = skillsRoot;
     });
 }
+
+builder.Services.RemoveAll<ISkillExecutor>();
+builder.Services.AddSingleton<ISkillExecutor, StudioPromptSkillExecutor>();
 
 var app = builder.Build();
 
@@ -134,6 +140,11 @@ app.MapGet("/api/agents", async (AgentService agentService, CancellationToken ca
 app.MapGet("/api/agent-tools", (AgentService agentService) =>
 {
     return Results.Ok(agentService.GetAvailableTools());
+});
+
+app.MapGet("/api/skills", (SkillService skillService) =>
+{
+    return Results.Ok(skillService.GetLoadedSkills());
 });
 
 app.MapPost("/api/agents", async (AgentRequestDto request, AgentService agentService, CancellationToken cancellationToken) =>
