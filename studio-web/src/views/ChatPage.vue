@@ -7,6 +7,14 @@
           <div class="chat-heading-meta">
             <div class="chat-heading-copy">
               <h3 class="chat-heading-title">{{ activeAgent?.name ?? activeConversation?.agentName ?? 'Chat' }}</h3>
+              <div class="chat-skill-state-row">
+                <n-tag v-if="activeConversation?.activeSkill" size="small" type="success" bordered data-testid="active-skill-tag">
+                  Active skill: {{ activeConversation.activeSkill.name }}
+                </n-tag>
+                <n-tag v-else-if="activeAgent?.enableSkills" size="small" type="warning" bordered>
+                  Skills enabled
+                </n-tag>
+              </div>
             </div>
             <n-tag v-if="activeModelSummary" type="info" bordered>{{ activeModelSummary }}</n-tag>
           </div>
@@ -408,7 +416,11 @@ async function submitPrompt() {
   prompt.value = ''
   isSending.value = true
   try {
-    await store.streamMessage(store.activeConversationId, content)
+    if (activeAgent.value?.enableSkills) {
+      await store.sendMessage(store.activeConversationId, content)
+    } else {
+      await store.streamMessage(store.activeConversationId, content)
+    }
     await store.fetchMessages(store.activeConversationId)
   } catch (error) {
     prompt.value = content
@@ -464,6 +476,12 @@ function formatConversationMeta(conversation: { createdAtUtc: string; messageCou
 
 .chat-send-button {
   margin-left: auto;
+}
+
+.chat-skill-state-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .approval-header {

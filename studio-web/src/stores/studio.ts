@@ -15,6 +15,7 @@ import {
   getModels,
   getOverview,
   getProviderConnections,
+  getSkills,
   resolveToolApproval,
   sendMessage,
   streamMessage,
@@ -26,7 +27,7 @@ import {
   type ModelPayload,
   type ProviderConnectionPayload,
 } from '../api/studio'
-import type { AgentItem, ConversationItem, MessageItem, ModelItem, Overview, ProviderConnection, ToolApprovalItem, ToolOption } from '../types'
+import type { AgentItem, ConversationItem, MessageItem, ModelItem, Overview, ProviderConnection, SkillItem, ToolApprovalItem, ToolOption } from '../types'
 
 export const useStudioStore = defineStore('studio', {
   state: () => ({
@@ -35,6 +36,7 @@ export const useStudioStore = defineStore('studio', {
     models: [] as ModelItem[],
     agents: [] as AgentItem[],
     agentTools: [] as ToolOption[],
+    skills: [] as SkillItem[],
     conversations: [] as ConversationItem[],
     messagesByConversation: {} as Record<string, MessageItem[]>,
     toolApprovalsByConversation: {} as Record<string, ToolApprovalItem[]>,
@@ -64,12 +66,13 @@ export const useStudioStore = defineStore('studio', {
     async bootstrap() {
       this.isLoading = true
       try {
-        const [overview, providerConnections, models, agents, agentTools, conversations] = await Promise.all([
+        const [overview, providerConnections, models, agents, agentTools, skills, conversations] = await Promise.all([
           getOverview(),
           getProviderConnections(),
           getModels(),
           getAgents(),
           getAgentTools(),
+          getSkills(),
           getConversations(),
         ])
         this.overview = overview
@@ -77,6 +80,7 @@ export const useStudioStore = defineStore('studio', {
         this.models = models
         this.agents = agents
         this.agentTools = agentTools
+        this.skills = skills
         this.conversations = conversations
         if (!this.activeConversationId && conversations.length > 0) {
           this.activeConversationId = conversations[0].id

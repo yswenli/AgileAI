@@ -66,6 +66,30 @@
           <n-form-item label="Enable skills"><n-switch v-model:value="form.enableSkills" /></n-form-item>
           <n-form-item label="Pin on top"><n-switch v-model:value="form.isPinned" /></n-form-item>
         </div>
+        <n-collapse v-if="store.skills.length" class="agent-tools-collapse">
+          <n-collapse-item :title="`Loaded skills (${store.skills.length})`" name="skills">
+            <div class="agent-skill-list">
+              <div v-for="skill in store.skills" :key="skill.name" class="agent-skill-item">
+                <div class="agent-skill-header">
+                  <strong>{{ skill.name }}</strong>
+                  <n-tag size="tiny" type="info" bordered>{{ skill.entryMode || 'prompt' }}</n-tag>
+                </div>
+                <p v-if="skill.description" class="agent-skill-description">{{ skill.description }}</p>
+                <div v-if="skill.triggers.length" class="agent-skill-triggers">
+                  <n-tag v-for="trigger in skill.triggers" :key="`${skill.name}-${trigger}`" size="small" round>
+                    {{ trigger }}
+                  </n-tag>
+                </div>
+                <n-checkbox
+                  :checked="form.allowedSkillNames.includes(skill.name)"
+                  @update:checked="(checked) => toggleAllowedSkill(skill.name, checked)"
+                >
+                  Allow this skill for the agent
+                </n-checkbox>
+              </div>
+            </div>
+          </n-collapse-item>
+        </n-collapse>
         <n-collapse class="agent-tools-collapse">
           <n-collapse-item title="Tools" name="tools">
             <n-checkbox-group v-model:value="form.selectedToolNames" class="agent-tool-group">
@@ -113,6 +137,7 @@ const form = reactive<AgentPayload>({
   enableSkills: false,
   isPinned: false,
   selectedToolNames: [],
+  allowedSkillNames: [],
 })
 
 const modelOptions = computed(() =>
@@ -144,6 +169,7 @@ function resetForm() {
     enableSkills: false,
     isPinned: false,
     selectedToolNames: store.agentTools.map((tool) => tool.name),
+    allowedSkillNames: store.skills.map((skill) => skill.name),
   })
 }
 
@@ -160,11 +186,21 @@ function openModal(item?: AgentItem) {
       enableSkills: item.enableSkills,
       isPinned: item.isPinned,
       selectedToolNames: item.selectedToolNames.length ? [...item.selectedToolNames] : store.agentTools.map((tool) => tool.name),
+      allowedSkillNames: item.allowedSkillNames.length ? [...item.allowedSkillNames] : store.skills.map((skill) => skill.name),
     })
   } else {
     resetForm()
   }
   showModal.value = true
+}
+
+function toggleAllowedSkill(skillName: string, checked: boolean) {
+  if (checked) {
+    form.allowedSkillNames = [...new Set([...form.allowedSkillNames, skillName])]
+    return
+  }
+
+  form.allowedSkillNames = form.allowedSkillNames.filter((item) => item !== skillName)
 }
 
 async function submit() {
@@ -243,6 +279,36 @@ function navigateToChat(agent: AgentItem) {
   padding: 10px 12px;
   border: 1px solid rgba(148, 163, 184, 0.24);
   border-radius: 12px;
+}
+
+.agent-skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.agent-skill-item {
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+}
+
+.agent-skill-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-skill-description {
+  margin: 8px 0;
+  color: var(--text-color-2);
+}
+
+.agent-skill-triggers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 @media (max-width: 900px) {

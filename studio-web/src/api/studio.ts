@@ -1,5 +1,5 @@
 import { http } from './http'
-import type { AgentItem, ChatStreamStart, ConversationItem, MessageItem, ModelItem, Overview, ProviderConnection, ToolApprovalItem, ToolApprovalResolutionResult, ToolOption } from '../types'
+import type { AgentItem, ChatStreamStart, ConversationItem, MessageItem, ModelItem, Overview, ProviderConnection, SkillItem, ToolApprovalItem, ToolApprovalResolutionResult, ToolOption } from '../types'
 
 const messageRoleMap = [undefined, 'System', 'User', 'Assistant', 'Tool'] as const
 const providerTypeMap = ['OpenAI', 'OpenAI', 'OpenAICompatible', 'AzureOpenAI'] as const
@@ -81,6 +81,7 @@ export interface AgentPayload {
   enableSkills: boolean
   isPinned: boolean
   selectedToolNames: string[]
+  allowedSkillNames: string[]
 }
 
 export async function getOverview() {
@@ -138,6 +139,11 @@ export async function getAgents() {
 
 export async function getAgentTools() {
   const { data } = await http.get<ToolOption[]>('/agent-tools')
+  return data
+}
+
+export async function getSkills() {
+  const { data } = await http.get<SkillItem[]>('/skills')
   return data
 }
 

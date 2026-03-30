@@ -43,6 +43,7 @@ export interface AgentItem {
   enableSkills: boolean
   isPinned: boolean
   selectedToolNames: string[]
+  allowedSkillNames: string[]
   modelDisplayName: string
   runtimeModelId: string
   createdAtUtc: string
@@ -54,6 +55,20 @@ export interface ToolOption {
   description?: string | null
 }
 
+export interface ConversationSkillState {
+  name: string
+  description?: string | null
+}
+
+export interface SkillItem {
+  name: string
+  description?: string | null
+  version?: string | null
+  entryMode?: string | null
+  triggers: string[]
+  files: string[]
+}
+
 export interface ConversationItem {
   id: string
   agentId: string
@@ -62,6 +77,7 @@ export interface ConversationItem {
   createdAtUtc: string
   updatedAtUtc: string
   messageCount: number
+  activeSkill?: ConversationSkillState | null
 }
 
 export type MessageRole = 'System' | 'User' | 'Assistant' | 'Tool'
