@@ -17,6 +17,7 @@ import {
   getProviderConnections,
   getSkills,
   resolveToolApproval,
+  resolveToolApprovalStream,
   sendMessage,
   streamMessage,
   testModel,
@@ -189,41 +190,152 @@ export const useStudioStore = defineStore('studio', {
     async resolveToolApprovalAction(approvalId: string, approved: boolean, comment?: string) {
       this.resolvingApprovalIds = [...this.resolvingApprovalIds, approvalId]
       try {
-        const result = await resolveToolApproval(approvalId, approved, comment)
-        const conversationId = result.approval.conversationId
-        const approvals = this.toolApprovalsByConversation[conversationId] ?? []
-        const updatedApprovals = approvals.map((item) =>
-          item.id === approvalId ? result.approval : item,
-        )
+        const existingApproval = Object.values(this.toolApprovalsByConversation)
+          .flat()
+          .find((item) => item.id === approvalId)
 
-        this.toolApprovalsByConversation[conversationId] = result.pendingApproval
-          ? updatedApprovals.some((item) => item.id === result.pendingApproval?.id)
-            ? updatedApprovals.map((item) => item.id === result.pendingApproval?.id ? result.pendingApproval : item)
-            : [...updatedApprovals, result.pendingApproval]
-          : updatedApprovals
+        if (!existingApproval) {
+          const result = await resolveToolApproval(approvalId, approved, comment)
+          const conversationId = result.approval.conversationId
+          const approvals = this.toolApprovalsByConversation[conversationId] ?? []
+          const updatedApprovals = approvals.map((item) =>
+            item.id === approvalId ? result.approval : item,
+          )
 
-        const messages = [...(this.messagesByConversation[conversationId] ?? [])]
-        const index = messages.findIndex((item) => item.id === result.assistantMessage.id)
-        if (index >= 0) {
-          messages[index] = result.assistantMessage
-        } else {
-          messages.push(result.assistantMessage)
+          this.toolApprovalsByConversation[conversationId] = result.pendingApproval
+            ? updatedApprovals.some((item) => item.id === result.pendingApproval?.id)
+              ? updatedApprovals.map((item) => item.id === result.pendingApproval?.id ? result.pendingApproval : item)
+              : [...updatedApprovals, result.pendingApproval]
+            : updatedApprovals
+
+          const messages = [...(this.messagesByConversation[conversationId] ?? [])]
+          const index = messages.findIndex((item) => item.id === result.assistantMessage.id)
+          if (index >= 0) {
+            messages[index] = result.assistantMessage
+          } else {
+            messages.push(result.assistantMessage)
+          }
+
+          this.messagesByConversation[conversationId] = messages
+          this.conversations = this.conversations.map((item) =>
+            item.id === conversationId ? result.conversation : item,
+          )
+          await this.refreshOverview()
+          return result
         }
 
-        this.messagesByConversation[conversationId] = messages
-        this.conversations = this.conversations.map((item) =>
-          item.id === conversationId ? result.conversation : item,
-        )
+        const conversationId = existingApproval.conversationId
+        const assistantMessageId = existingApproval.assistantMessageId
+        const patchAssistantMessage = (patch: Partial<MessageItem>) => {
+          const messages = [...(this.messagesByConversation[conversationId] ?? [])]
+          const index = messages.findIndex((item) => item.id === assistantMessageId)
+          if (index < 0) {
+            return
+          }
+
+          messages[index] = {
+            ...messages[index],
+            ...patch,
+          }
+          this.messagesByConversation[conversationId] = messages
+        }
+
+        const updateApproval = (approval: ToolApprovalItem) => {
+          const approvals = this.toolApprovalsByConversation[conversationId] ?? []
+          const index = approvals.findIndex((item) => item.id === approval.id)
+          if (index >= 0) {
+            const next = [...approvals]
+            next[index] = approval
+            this.toolApprovalsByConversation[conversationId] = next
+          } else {
+            this.toolApprovalsByConversation[conversationId] = [...approvals, approval]
+          }
+        }
+
+        patchAssistantMessage({ isStreaming: true, content: '' })
+
+        await resolveToolApprovalStream(approvalId, approved, comment, {
+          onDelta: (delta) => {
+            const current = (this.messagesByConversation[conversationId] ?? []).find((item) => item.id === assistantMessageId)
+            patchAssistantMessage({
+              content: `${current?.content ?? ''}${delta}`,
+              isStreaming: true,
+            })
+          },
+          onUsage: ({ inputTokens, outputTokens }) => {
+            patchAssistantMessage({
+              inputTokens,
+              outputTokens,
+            })
+          },
+          onFinalMessage: ({ content, finishReason, inputTokens, outputTokens }) => {
+            patchAssistantMessage({
+              content,
+              finishReason: finishReason ?? null,
+              inputTokens,
+              outputTokens,
+              isStreaming: false,
+            })
+          },
+          onCompleted: ({ finishReason }) => {
+            patchAssistantMessage({
+              finishReason: finishReason ?? null,
+              isStreaming: false,
+            })
+          },
+          onApprovalRequired: (approval) => {
+            updateApproval(approval)
+            if (this.autoApproveToolCallsByConversation[conversationId]) {
+              void this.resolveToolApprovalAction(approval.id, true, 'Auto-approved for this session.')
+            }
+          },
+          onError: (message) => {
+            this.streamError = message
+            patchAssistantMessage({
+              content: message,
+              isStreaming: false,
+            })
+          },
+        })
+
+        const refreshedApprovals = await getConversationToolApprovals(conversationId)
+        this.toolApprovalsByConversation[conversationId] = refreshedApprovals
+        this.conversations = await getConversations()
         await this.refreshOverview()
-        return result
+        return null
       } finally {
         this.resolvingApprovalIds = this.resolvingApprovalIds.filter((item) => item !== approvalId)
       }
     },
     async sendMessage(conversationId: string, content: string) {
+      const normalizedContent = content.trim()
+      const existing = this.messagesByConversation[conversationId] ?? []
+      const optimisticUserId = `temp-user-${Date.now()}`
+      const optimisticAssistantId = `temp-assistant-${Date.now()}`
+
+      this.activeConversationId = conversationId
+      this.messagesByConversation[conversationId] = [
+        ...existing,
+        {
+          id: optimisticUserId,
+          conversationId,
+          role: 'User',
+          content: normalizedContent,
+          isStreaming: false,
+          createdAtUtc: new Date().toISOString(),
+        },
+        {
+          id: optimisticAssistantId,
+          conversationId,
+          role: 'Assistant',
+          content: '',
+          isStreaming: true,
+          createdAtUtc: new Date().toISOString(),
+        },
+      ]
+
       const result = await sendMessage(conversationId, content)
-      const list = this.messagesByConversation[conversationId] ?? []
-      this.messagesByConversation[conversationId] = [...list, result.userMessage, result.assistantMessage]
+      this.messagesByConversation[conversationId] = [...existing, result.userMessage, result.assistantMessage]
       this.conversations = this.conversations.map((item) =>
         item.id === conversationId ? result.conversation : item,
       )

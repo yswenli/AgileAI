@@ -282,6 +282,124 @@ public class ChatSessionTests
         mockChatClient.Verify(c => c.CompleteAsync(It.IsAny<ChatRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
+    [Fact]
+    public async Task StreamTurnAsync_WithPlainText_ShouldEmitDeltasAndCompleted()
+    {
+        var mockChatClient = new Mock<IChatClient>();
+        mockChatClient.Setup(c => c.StreamAsync(It.IsAny<ChatRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(Stream(
+                new TextDeltaUpdate("Hel"),
+                new TextDeltaUpdate("lo"),
+                new UsageUpdate(new UsageInfo { PromptTokens = 5, CompletionTokens = 2 }),
+                new CompletedUpdate("stop")));
+
+        var session = new ChatSession(mockChatClient.Object, "test-model");
+
+        var updates = new List<ChatTurnStreamUpdate>();
+        await foreach (var update in session.StreamTurnAsync("hi"))
+        {
+            updates.Add(update);
+        }
+
+        Assert.Contains(updates, x => x is ChatTurnTextDelta td && td.Delta == "Hel");
+        Assert.Contains(updates, x => x is ChatTurnTextDelta td && td.Delta == "lo");
+        Assert.Contains(updates, x => x is ChatTurnUsage usage && usage.Usage.PromptTokens == 5 && usage.Usage.CompletionTokens == 2);
+        Assert.Contains(updates, x => x is ChatTurnCompleted completed && completed.Response.Message?.TextContent == "Hello" && completed.Response.FinishReason == "stop");
+        Assert.Equal("Hello", session.History.Last().TextContent);
+    }
+
+    [Fact]
+    public async Task StreamTurnAsync_WithToolCallAndPendingApproval_ShouldEmitTextAndPendingApproval()
+    {
+        var toolCall = new ToolCall { Id = "call-approval", Name = "approval-tool", Arguments = "{}" };
+        var mockChatClient = new Mock<IChatClient>();
+        mockChatClient.Setup(c => c.StreamAsync(It.IsAny<ChatRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(Stream(
+                new TextDeltaUpdate("Need approval."),
+                new ToolCallDeltaUpdate(toolCall.Id, toolCall.Name, toolCall.Arguments),
+                new CompletedUpdate("tool_calls")));
+
+        var tool = new ApprovalAwareTestTool("approval-tool", "approved-result");
+        var registry = new InMemoryToolRegistry();
+        registry.Register(tool);
+
+        var session = new ChatSession(
+            mockChatClient.Object,
+            "test-model",
+            registry,
+            toolExecutionGate: new PendingExecutionGate());
+
+        var updates = new List<ChatTurnStreamUpdate>();
+        await foreach (var update in session.StreamTurnAsync("hello"))
+        {
+            updates.Add(update);
+        }
+
+        Assert.Contains(updates, x => x is ChatTurnTextDelta td && td.Delta == "Need approval.");
+        var pending = Assert.Single(updates.OfType<ChatTurnPendingApproval>());
+        Assert.Equal("approval-tool", pending.PendingApprovalRequest.ToolName);
+        Assert.Equal("Need approval.", pending.Response.Message?.TextContent);
+        Assert.Equal(0, tool.ExecutionCount);
+        Assert.Equal(ChatRole.Assistant, session.History.Last().Role);
+    }
+
+    [Fact]
+    public async Task ContinueStreamAsync_AfterApprovedToolResult_ShouldResumeWithDeltas()
+    {
+        var firstToolCall = new ToolCall { Id = "call-1", Name = "approval-tool", Arguments = "{}" };
+        var secondResponseText = "All done";
+        var mockChatClient = new Mock<IChatClient>();
+        mockChatClient.SetupSequence(c => c.StreamAsync(It.IsAny<ChatRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(Stream(
+                new TextDeltaUpdate("Need first approval."),
+                new ToolCallDeltaUpdate(firstToolCall.Id, firstToolCall.Name, firstToolCall.Arguments),
+                new CompletedUpdate("tool_calls")))
+            .Returns(Stream(
+                new TextDeltaUpdate("All "),
+                new TextDeltaUpdate("done"),
+                new CompletedUpdate("stop")));
+
+        var tool = new ApprovalAwareTestTool("approval-tool", "approved-result");
+        var registry = new InMemoryToolRegistry();
+        registry.Register(tool);
+        var gate = new SequenceExecutionGate(
+            ToolApprovalDecision.PendingDecision("approval-1"),
+            ToolApprovalDecision.ApprovedDecision("approval-1"));
+
+        var session = new ChatSession(mockChatClient.Object, "test-model", registry, toolExecutionGate: gate);
+
+        await foreach (var _ in session.StreamTurnAsync("start"))
+        {
+        }
+
+        session.AddMessage(new ChatMessage
+        {
+            Role = ChatRole.Tool,
+            ToolCallId = firstToolCall.Id,
+            TextContent = "approved-result"
+        });
+
+        var updates = new List<ChatTurnStreamUpdate>();
+        await foreach (var update in session.ContinueStreamAsync())
+        {
+            updates.Add(update);
+        }
+
+        Assert.Contains(updates, x => x is ChatTurnTextDelta td && td.Delta == "All ");
+        Assert.Contains(updates, x => x is ChatTurnTextDelta td && td.Delta == "done");
+        Assert.Contains(updates, x => x is ChatTurnCompleted completed && completed.Response.Message?.TextContent == secondResponseText);
+        Assert.Equal(secondResponseText, session.History.Last().TextContent);
+    }
+
+    private static async IAsyncEnumerable<StreamingChatUpdate> Stream(params StreamingChatUpdate[] updates)
+    {
+        foreach (var update in updates)
+        {
+            yield return update;
+            await Task.Yield();
+        }
+    }
+
     private sealed class ApprovalAwareTestTool(string name, string resultContent) : ITool, IApprovalAwareTool
     {
         public string Name => name;

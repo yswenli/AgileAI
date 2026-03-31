@@ -207,4 +207,10 @@ app.MapPost("/api/tool-approvals/{id:guid}/resolve", async (Guid id, ResolveTool
     return Results.Ok(result);
 });
 
+app.MapPost("/api/tool-approvals/{id:guid}/resolve/stream", async (Guid id, ResolveToolApprovalRequest request, ToolApprovalService toolApprovalService, HttpContext httpContext, CancellationToken cancellationToken) =>
+{
+    await toolApprovalService.StreamApprovalResolutionAsync(id, request.Approved, request.Comment, httpContext.Response, cancellationToken);
+    return Results.Empty;
+});
+
 app.Run();

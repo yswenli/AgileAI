@@ -3,6 +3,7 @@ using AgileAI.Core;
 using AgileAI.Extensions.FileSystem;
 using AgileAI.Studio.Api.Contracts;
 using AgileAI.Studio.Api.Domain;
+using System.Text;
 using System.Text.Json;
 
 namespace AgileAI.Studio.Api.Services;
@@ -13,6 +14,10 @@ public class AgentExecutionService(
     ModelCatalogService modelCatalogService,
     ProviderClientFactory providerClientFactory,
     IAgentRuntime agentRuntime,
+    ISkillRegistry skillRegistry,
+    ISessionStore sessionStore,
+    ISkillPlanner skillPlanner,
+    ISkillContinuationPolicy skillContinuationPolicy,
     StudioToolRegistryFactory toolRegistryFactory,
     StudioToolExecutionGate toolExecutionGate,
     ToolApprovalService toolApprovalService)
@@ -32,6 +37,54 @@ public class AgentExecutionService(
         var trimmedContent = content.Trim();
 
         var userMessage = await conversationService.AddMessageAsync(conversation.Id, MessageRole.User, trimmedContent, false, null, null, null, cancellationToken);
+
+        async Task<ChatResultDto> ExecuteStudioChatSessionFallbackAsync()
+        {
+            var session = CreateSession(conversation, agent, runtime.RuntimeModelId, chatClient);
+            var turn = await session.SendTurnAsync(trimmedContent, new ChatOptions
+            {
+                Temperature = agent.Temperature,
+                MaxTokens = agent.MaxTokens
+            }, cancellationToken);
+
+            var response = turn.Response;
+
+            if (!response.IsSuccess)
+            {
+                throw new InvalidOperationException(response.ErrorMessage ?? "Model request failed.");
+            }
+
+            var assistantText = turn.PendingApprovalRequest == null
+                ? response.Message?.TextContent ?? string.Empty
+                : $"Command approval required for {turn.PendingApprovalRequest.ToolName}.";
+            var assistant = await conversationService.AddMessageAsync(
+                conversation.Id,
+                MessageRole.Assistant,
+                assistantText,
+                false,
+                response.FinishReason,
+                response.Usage?.PromptTokens,
+                response.Usage?.CompletionTokens,
+                cancellationToken);
+
+            if (turn.PendingApprovalRequest != null)
+            {
+                await toolApprovalService.CreatePendingApprovalAsync(
+                    conversation,
+                    assistant.Id,
+                    turn.PendingApprovalRequest,
+                    response.Message?.TextContent ?? string.Empty,
+                    cancellationToken);
+            }
+
+            await TryGenerateConversationTitleAsync(conversation, trimmedContent, assistantText, cancellationToken);
+            await conversationService.TouchConversationAsync(conversation, cancellationToken);
+
+            return new ChatResultDto(
+                await conversationService.MapConversationAsync(conversation, cancellationToken),
+                ConversationService.MapMessage(userMessage),
+                ConversationService.MapMessage(assistant));
+        }
 
         if (agent.EnableSkills)
         {
@@ -53,6 +106,11 @@ public class AgentExecutionService(
 
             if (!runtimeResult.IsSuccess)
             {
+                if ((runtimeResult.ErrorMessage ?? string.Empty).Contains("Provider '", StringComparison.OrdinalIgnoreCase))
+                {
+                    return await ExecuteStudioChatSessionFallbackAsync();
+                }
+
                 throw new InvalidOperationException(runtimeResult.ErrorMessage ?? "Skill runtime request failed.");
             }
 
@@ -76,50 +134,7 @@ public class AgentExecutionService(
                 ConversationService.MapMessage(assistantMessage));
         }
 
-        var session = CreateSession(conversation, agent, runtime.RuntimeModelId, chatClient);
-        var turn = await session.SendTurnAsync(trimmedContent, new ChatOptions
-        {
-            Temperature = agent.Temperature,
-            MaxTokens = agent.MaxTokens
-        }, cancellationToken);
-
-        var response = turn.Response;
-
-        if (!response.IsSuccess)
-        {
-            throw new InvalidOperationException(response.ErrorMessage ?? "Model request failed.");
-        }
-
-        var assistantText = turn.PendingApprovalRequest == null
-            ? response.Message?.TextContent ?? string.Empty
-            : $"Command approval required for {turn.PendingApprovalRequest.ToolName}.";
-        var assistant = await conversationService.AddMessageAsync(
-            conversation.Id,
-            MessageRole.Assistant,
-            assistantText,
-            false,
-            response.FinishReason,
-            response.Usage?.PromptTokens,
-            response.Usage?.CompletionTokens,
-            cancellationToken);
-
-        if (turn.PendingApprovalRequest != null)
-        {
-            await toolApprovalService.CreatePendingApprovalAsync(
-                conversation,
-                assistant.Id,
-                turn.PendingApprovalRequest,
-                response.Message?.TextContent ?? string.Empty,
-                cancellationToken);
-        }
-
-        await TryGenerateConversationTitleAsync(conversation, trimmedContent, assistantText, cancellationToken);
-        await conversationService.TouchConversationAsync(conversation, cancellationToken);
-
-        return new ChatResultDto(
-            await conversationService.MapConversationAsync(conversation, cancellationToken),
-            ConversationService.MapMessage(userMessage),
-            ConversationService.MapMessage(assistant));
+        return await ExecuteStudioChatSessionFallbackAsync();
     }
 
     public async Task StreamMessageAsync(Guid conversationId, string content, HttpResponse response, CancellationToken cancellationToken)
@@ -144,60 +159,314 @@ public class AgentExecutionService(
 
         try
         {
-            var turn = await CreateSession(conversation, agent, runtime.RuntimeModelId, chatClient)
-                .SendTurnAsync(trimmedContent, new ChatOptions
+            if (agent.EnableSkills)
+            {
+                var selectedToolNames = await agentService.GetSelectedToolNamesAsync(agent.Id, cancellationToken);
+                var allowedSkillNames = await agentService.GetAllowedSkillNamesAsync(agent.Id, cancellationToken);
+                var agentRequest = new AgentRequest
                 {
-                    Temperature = agent.Temperature,
-                    MaxTokens = agent.MaxTokens
-                }, cancellationToken);
+                    SessionId = conversation.Id.ToString(),
+                    ModelId = runtime.RuntimeModelId,
+                    Input = trimmedContent,
+                    EnableSkills = true,
+                    AllowedSkills = allowedSkillNames,
+                    Metadata = new Dictionary<string, object?>
+                    {
+                        ["conversationId"] = conversation.Id.ToString(),
+                        ["agentId"] = agent.Id.ToString(),
+                        ["studioModelId"] = agent.StudioModelId.ToString()
+                    }
+                };
 
-            if (!turn.Response.IsSuccess)
-            {
-                throw new InvalidOperationException(turn.Response.ErrorMessage ?? "Model request failed.");
+                var resolvedSkill = await ResolveSkillForStreamingAsync(agentRequest, conversation.Id, cancellationToken);
+                if (resolvedSkill != null)
+                {
+                    var preparedHistory = SkillPromptHelper.PrepareHistoryForSkill(
+                        BuildRequestHistory(conversation, agent).ToList(),
+                        resolvedSkill.Manifest!).ToList();
+
+                    if (selectedToolNames.Count == 0)
+                    {
+                        await StreamPlainChatAsync(preparedHistory, runtime.RuntimeModelId, chatClient, assistant, response, conversation, trimmedContent, cancellationToken, resolvedSkill.Name);
+                        return;
+                    }
+
+                    var skillSession = CreateSession(conversation, agent, runtime.RuntimeModelId, chatClient, preparedHistory);
+                    await StreamSessionTurnAsync(
+                        skillSession,
+                        trimmedContent,
+                        conversation,
+                        assistant,
+                        response,
+                        cancellationToken,
+                        resolvedSkill.Name,
+                        agentRequest.Metadata);
+                    return;
+                }
             }
 
-            if (turn.PendingApprovalRequest != null)
-            {
-                var waitingContent = $"Command approval required for {turn.PendingApprovalRequest.ToolName}.";
-                await conversationService.UpdateMessageAsync(assistant, waitingContent, false, null, null, null, cancellationToken);
-                var approval = await toolApprovalService.CreatePendingApprovalAsync(
-                    conversation,
-                    assistant.Id,
-                    turn.PendingApprovalRequest,
-                    turn.Response.Message?.TextContent ?? string.Empty,
-                    cancellationToken);
-                await WriteSseAsync(response, "approval-required", approval, cancellationToken);
-                await WriteSseAsync(response, "final-message", new { content = waitingContent, finishReason = (string?)null, inputTokens = (int?)null, outputTokens = (int?)null }, cancellationToken);
-                await WriteSseAsync(response, "completed", new { finishReason = "approval_required" }, cancellationToken);
-                await conversationService.TouchConversationAsync(conversation, cancellationToken);
-                return;
-            }
-
-            var assistantContent = turn.Response.Message?.TextContent ?? string.Empty;
-            await conversationService.UpdateMessageAsync(
+            await StreamSessionTurnAsync(
+                CreateSession(conversation, agent, runtime.RuntimeModelId, chatClient),
+                trimmedContent,
+                conversation,
                 assistant,
-                assistantContent,
-                false,
-                turn.Response.FinishReason,
-                turn.Response.Usage?.PromptTokens,
-                turn.Response.Usage?.CompletionTokens,
-                cancellationToken);
-            await TryGenerateConversationTitleAsync(conversation, trimmedContent, assistantContent, cancellationToken);
-            await WriteSseAsync(response, "final-message", new
-            {
-                content = assistantContent,
-                finishReason = turn.Response.FinishReason,
-                inputTokens = turn.Response.Usage?.PromptTokens,
-                outputTokens = turn.Response.Usage?.CompletionTokens
-            }, cancellationToken);
-            await WriteSseAsync(response, "completed", new { finishReason = turn.Response.FinishReason }, cancellationToken);
-            await conversationService.TouchConversationAsync(conversation, cancellationToken);
+                response,
+                cancellationToken,
+                null,
+                new Dictionary<string, object?>
+                {
+                    ["conversationId"] = conversation.Id.ToString(),
+                    ["agentId"] = agent.Id.ToString(),
+                    ["studioModelId"] = agent.StudioModelId.ToString()
+                });
         }
         catch (Exception ex)
         {
             await conversationService.UpdateMessageAsync(assistant, ex.Message, false, null, null, null, cancellationToken);
             await WriteSseAsync(response, "error", new { message = ex.Message }, cancellationToken);
         }
+    }
+
+    private async Task<ISkill?> ResolveSkillForStreamingAsync(AgentRequest request, Guid conversationId, CancellationToken cancellationToken)
+    {
+        var sessionState = await sessionStore.GetAsync(conversationId.ToString(), cancellationToken);
+        var skills = skillRegistry.GetAllSkills() ?? [];
+        if (skills.Count == 0)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.PreferredSkill))
+        {
+            var preferred = skills.FirstOrDefault(x => string.Equals(x.Name, request.PreferredSkill, StringComparison.OrdinalIgnoreCase));
+            if (preferred != null && (request.AllowedSkills == null || request.AllowedSkills.Contains(preferred.Name, StringComparer.OrdinalIgnoreCase)))
+            {
+                return preferred;
+            }
+        }
+
+        var continuationDecision = await skillContinuationPolicy.DecideAsync(request, sessionState, skills, cancellationToken);
+        if (continuationDecision.ContinueActiveSkill && !string.IsNullOrWhiteSpace(continuationDecision.SkillName))
+        {
+            var continuedSkill = skills.FirstOrDefault(x => string.Equals(x.Name, continuationDecision.SkillName, StringComparison.OrdinalIgnoreCase));
+            if (continuedSkill != null && (request.AllowedSkills == null || request.AllowedSkills.Contains(continuedSkill.Name, StringComparer.OrdinalIgnoreCase)))
+            {
+                return continuedSkill;
+            }
+        }
+
+        var skillPlan = await skillPlanner.PlanAsync(request, skills, cancellationToken);
+        if (!skillPlan.ShouldUseSkill || string.IsNullOrWhiteSpace(skillPlan.SkillName))
+        {
+            return null;
+        }
+
+        return skills.FirstOrDefault(x => string.Equals(x.Name, skillPlan.SkillName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task StreamPlainChatAsync(
+        IReadOnlyList<ChatMessage> messages,
+        string modelId,
+        IChatClient chatClient,
+        ConversationMessage assistant,
+        HttpResponse response,
+        Conversation conversation,
+        string userContent,
+        CancellationToken cancellationToken,
+        string? activeSkill = null)
+    {
+        var assistantBuilder = new StringBuilder();
+        string? finishReason = null;
+        int? inputTokens = null;
+        int? outputTokens = null;
+
+        await foreach (var update in chatClient.StreamAsync(new ChatRequest
+        {
+            ModelId = modelId,
+            Messages = messages,
+            Options = new ChatOptions
+            {
+                Temperature = conversation.AgentDefinition?.Temperature,
+                MaxTokens = conversation.AgentDefinition?.MaxTokens
+            }
+        }, cancellationToken))
+        {
+            switch (update)
+            {
+                case TextDeltaUpdate textDelta:
+                    assistantBuilder.Append(textDelta.Delta);
+                    await WriteSseAsync(response, "text-delta", new { delta = textDelta.Delta }, cancellationToken);
+                    break;
+                case UsageUpdate usageUpdate:
+                    inputTokens = usageUpdate.Usage.PromptTokens;
+                    outputTokens = usageUpdate.Usage.CompletionTokens;
+                    await WriteSseAsync(response, "usage", new { inputTokens, outputTokens }, cancellationToken);
+                    break;
+                case CompletedUpdate completedUpdate:
+                    finishReason = completedUpdate.FinishReason;
+                    break;
+                case ErrorUpdate errorUpdate:
+                    throw new InvalidOperationException(errorUpdate.ErrorMessage);
+            }
+        }
+
+        var assistantContent = assistantBuilder.ToString();
+        await conversationService.UpdateMessageAsync(
+            assistant,
+            assistantContent,
+            false,
+            finishReason,
+            inputTokens,
+            outputTokens,
+            cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(activeSkill))
+        {
+            await sessionStore.SaveAsync(new ConversationState
+            {
+                SessionId = conversation.Id.ToString(),
+                History = messages.Concat([ChatMessage.Assistant(assistantContent)]).ToList(),
+                ActiveSkill = activeSkill,
+                Metadata = new Dictionary<string, object?>
+                {
+                    ["conversationId"] = conversation.Id.ToString(),
+                    ["agentId"] = conversation.AgentDefinitionId.ToString(),
+                    ["studioModelId"] = conversation.AgentDefinition?.StudioModelId.ToString()
+                },
+                UpdatedAt = DateTimeOffset.UtcNow
+            }, cancellationToken);
+        }
+        else
+        {
+            await sessionStore.SaveAsync(new ConversationState
+            {
+                SessionId = conversation.Id.ToString(),
+                History = messages.Concat([ChatMessage.Assistant(assistantContent)]).ToList(),
+                ActiveSkill = null,
+                Metadata = new Dictionary<string, object?>
+                {
+                    ["conversationId"] = conversation.Id.ToString(),
+                    ["agentId"] = conversation.AgentDefinitionId.ToString(),
+                    ["studioModelId"] = conversation.AgentDefinition?.StudioModelId.ToString()
+                },
+                UpdatedAt = DateTimeOffset.UtcNow
+            }, cancellationToken);
+        }
+
+        await TryGenerateConversationTitleAsync(conversation, userContent, assistantContent, cancellationToken);
+        await WriteSseAsync(response, "final-message", new
+        {
+            content = assistantContent,
+            finishReason,
+            inputTokens,
+            outputTokens
+        }, cancellationToken);
+        await WriteSseAsync(response, "completed", new { finishReason }, cancellationToken);
+        await conversationService.TouchConversationAsync(conversation, cancellationToken);
+    }
+
+    private async Task StreamSessionTurnAsync(
+        IChatSession session,
+        string userContent,
+        Conversation conversation,
+        ConversationMessage assistant,
+        HttpResponse response,
+        CancellationToken cancellationToken,
+        string? activeSkill,
+        IReadOnlyDictionary<string, object?>? metadata)
+    {
+        await foreach (var update in session.StreamTurnAsync(userContent, new ChatOptions
+        {
+            Temperature = conversation.AgentDefinition?.Temperature,
+            MaxTokens = conversation.AgentDefinition?.MaxTokens
+        }, cancellationToken))
+        {
+            switch (update)
+            {
+                case ChatTurnTextDelta textDelta:
+                    await WriteSseAsync(response, "text-delta", new { delta = textDelta.Delta }, cancellationToken);
+                    break;
+                case ChatTurnUsage usage:
+                    await WriteSseAsync(response, "usage", new
+                    {
+                        inputTokens = usage.Usage.PromptTokens,
+                        outputTokens = usage.Usage.CompletionTokens
+                    }, cancellationToken);
+                    break;
+                case ChatTurnPendingApproval pendingApproval:
+                    await PersistConversationStateAsync(conversation, session.History, activeSkill, metadata, cancellationToken);
+
+                    var waitingContent = $"Command approval required for {pendingApproval.PendingApprovalRequest.ToolName}.";
+                    await conversationService.UpdateMessageAsync(assistant, waitingContent, false, null, null, null, cancellationToken);
+
+                    var approval = await toolApprovalService.CreatePendingApprovalAsync(
+                        conversation,
+                        assistant.Id,
+                        pendingApproval.PendingApprovalRequest,
+                        pendingApproval.Response.Message?.TextContent ?? string.Empty,
+                        cancellationToken);
+
+                    await WriteSseAsync(response, "approval-required", approval, cancellationToken);
+                    await WriteSseAsync(response, "final-message", new { content = waitingContent, finishReason = (string?)null, inputTokens = (int?)null, outputTokens = (int?)null }, cancellationToken);
+                    await WriteSseAsync(response, "completed", new { finishReason = "approval_required" }, cancellationToken);
+                    await conversationService.TouchConversationAsync(conversation, cancellationToken);
+                    return;
+                case ChatTurnCompleted completed:
+                    if (!completed.Response.IsSuccess)
+                    {
+                        throw new InvalidOperationException(completed.Response.ErrorMessage ?? "Model request failed.");
+                    }
+
+                    var assistantContent = completed.Response.Message?.TextContent ?? string.Empty;
+                    await conversationService.UpdateMessageAsync(
+                        assistant,
+                        assistantContent,
+                        false,
+                        completed.Response.FinishReason,
+                        completed.Response.Usage?.PromptTokens,
+                        completed.Response.Usage?.CompletionTokens,
+                        cancellationToken);
+                    await PersistConversationStateAsync(conversation, session.History, activeSkill, metadata, cancellationToken);
+                    await TryGenerateConversationTitleAsync(conversation, userContent, assistantContent, cancellationToken);
+                    await WriteSseAsync(response, "final-message", new
+                    {
+                        content = assistantContent,
+                        finishReason = completed.Response.FinishReason,
+                        inputTokens = completed.Response.Usage?.PromptTokens,
+                        outputTokens = completed.Response.Usage?.CompletionTokens
+                    }, cancellationToken);
+                    await WriteSseAsync(response, "completed", new { finishReason = completed.Response.FinishReason }, cancellationToken);
+                    await conversationService.TouchConversationAsync(conversation, cancellationToken);
+                    return;
+                case ChatTurnError error:
+                    throw new InvalidOperationException(error.ErrorMessage);
+            }
+        }
+
+        throw new InvalidOperationException("Streaming turn ended without a terminal update.");
+    }
+
+    private async Task PersistConversationStateAsync(
+        Conversation conversation,
+        IReadOnlyList<ChatMessage> history,
+        string? activeSkill,
+        IReadOnlyDictionary<string, object?>? metadata,
+        CancellationToken cancellationToken)
+    {
+        await sessionStore.SaveAsync(new ConversationState
+        {
+            SessionId = conversation.Id.ToString(),
+            History = history,
+            ActiveSkill = activeSkill,
+            Metadata = metadata?.ToDictionary(static entry => entry.Key, static entry => entry.Value)
+                ?? new Dictionary<string, object?>
+                {
+                    ["conversationId"] = conversation.Id.ToString(),
+                    ["agentId"] = conversation.AgentDefinitionId.ToString(),
+                    ["studioModelId"] = conversation.AgentDefinition?.StudioModelId.ToString()
+                },
+            UpdatedAt = DateTimeOffset.UtcNow
+        }, cancellationToken);
     }
 
     private async Task<ExecutionResult> SendMessageWithSessionAsync(Conversation conversation, string content, CancellationToken cancellationToken)
@@ -225,11 +494,11 @@ public class AgentExecutionService(
             response.Usage?.CompletionTokens);
     }
 
-    private ChatSession CreateSession(Conversation conversation, AgentDefinition agent, string runtimeModelId, IChatClient chatClient)
+    private ChatSession CreateSession(Conversation conversation, AgentDefinition agent, string runtimeModelId, IChatClient chatClient, IReadOnlyList<ChatMessage>? historyOverride = null)
     {
         var selectedToolNames = agentService.GetSelectedToolNamesAsync(agent.Id, CancellationToken.None).GetAwaiter().GetResult();
         var toolRegistry = toolRegistryFactory.CreateRegistry(selectedToolNames);
-        var history = BuildRequestHistory(conversation, agent);
+        var history = historyOverride ?? BuildRequestHistory(conversation, agent);
 
         return new ChatSessionBuilder(chatClient, runtimeModelId)
             .WithToolRegistry(toolRegistry)

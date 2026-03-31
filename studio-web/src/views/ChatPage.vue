@@ -416,11 +416,7 @@ async function submitPrompt() {
   prompt.value = ''
   isSending.value = true
   try {
-    if (activeAgent.value?.enableSkills) {
-      await store.sendMessage(store.activeConversationId, content)
-    } else {
-      await store.streamMessage(store.activeConversationId, content)
-    }
+    await store.streamMessage(store.activeConversationId, content)
     await store.fetchMessages(store.activeConversationId)
   } catch (error) {
     prompt.value = content

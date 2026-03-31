@@ -4,6 +4,7 @@ using AgileAI.Studio.Api.Contracts;
 using AgileAI.Studio.Api.Data;
 using AgileAI.Studio.Api.Domain;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace AgileAI.Studio.Api.Services;
 
@@ -15,6 +16,11 @@ public sealed class ToolApprovalService(
     ProviderClientFactory providerClientFactory,
     StudioToolRegistryFactory toolRegistryFactory)
 {
+    private static readonly JsonSerializerOptions SseJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     public async Task<ToolApprovalDto> CreatePendingApprovalAsync(
         Conversation conversation,
         Guid assistantMessageId,
@@ -167,6 +173,166 @@ public sealed class ToolApprovalService(
             pendingApprovalDto);
     }
 
+    public async Task StreamApprovalResolutionAsync(Guid approvalId, bool approved, string? comment, HttpResponse response, CancellationToken cancellationToken)
+    {
+        response.Headers.ContentType = "text/event-stream";
+        response.Headers.CacheControl = "no-cache";
+
+        var approval = await dbContext.ToolApprovalRequests.FirstOrDefaultAsync(x => x.Id == approvalId, cancellationToken)
+            ?? throw new InvalidOperationException("Tool approval request not found.");
+
+        if (approval.Status != ToolApprovalStatus.Pending)
+        {
+            throw new InvalidOperationException("Tool approval request has already been resolved.");
+        }
+
+        var conversation = await conversationService.GetConversationEntityAsync(approval.ConversationId, cancellationToken);
+        var assistantMessage = conversation.Messages.FirstOrDefault(x => x.Id == approval.AssistantMessageId)
+            ?? throw new InvalidOperationException("Assistant placeholder message not found.");
+        var agent = conversation.AgentDefinition ?? throw new InvalidOperationException("Conversation agent is missing.");
+        var runtime = await modelCatalogService.GetRuntimeOptionsAsync(agent.StudioModelId, cancellationToken);
+        var chatClient = providerClientFactory.CreateClient(runtime);
+        var selectedToolNames = await agentService.GetSelectedToolNamesAsync(agent.Id, cancellationToken);
+        var toolRegistry = toolRegistryFactory.CreateRegistry(selectedToolNames);
+        var chatSession = new ChatSessionBuilder(chatClient, runtime.RuntimeModelId)
+            .WithToolRegistry(toolRegistry)
+            .WithToolExecutionGate(new StudioToolExecutionGate())
+            .WithConversationId(conversation.Id.ToString())
+            .WithHistory(BuildResumeHistory(conversation, assistantMessage.Id, approval))
+            .Build();
+
+        approval.DecisionComment = comment;
+        approval.DecidedAtUtc = DateTimeOffset.UtcNow;
+
+        ToolResult toolResult;
+        if (approved)
+        {
+            approval.Status = ToolApprovalStatus.Approved;
+            if (!toolRegistry.TryGetTool(approval.ToolName, out var tool) || tool == null)
+            {
+                throw new InvalidOperationException($"Tool '{approval.ToolName}' not found.");
+            }
+
+            var toolCall = new ToolCall { Id = approval.ToolCallId, Name = approval.ToolName, Arguments = approval.ArgumentsJson };
+            toolResult = await tool.ExecuteAsync(new ToolExecutionContext
+            {
+                ToolCall = toolCall,
+                ChatHistory = chatSession.History,
+                ConversationId = conversation.Id.ToString(),
+                ServiceProvider = null
+            }, cancellationToken);
+        }
+        else
+        {
+            approval.Status = ToolApprovalStatus.Denied;
+            toolResult = new ToolResult
+            {
+                ToolCallId = approval.ToolCallId,
+                IsSuccess = false,
+                Status = ToolExecutionStatus.Denied,
+                Content = comment ?? $"Execution of tool '{approval.ToolName}' was denied by the user."
+            };
+        }
+
+        approval.ResultContent = toolResult.Content;
+        if (toolResult.Data is ProcessExecutionResult processResult)
+        {
+            approval.ExitCode = processResult.ExitCode;
+            approval.StandardOutput = processResult.StandardOutput;
+            approval.StandardError = processResult.StandardError;
+        }
+
+        chatSession.AddMessage(new ChatMessage { Role = ChatRole.Tool, ToolCallId = approval.ToolCallId, TextContent = toolResult.Content });
+
+        await foreach (var update in chatSession.ContinueStreamAsync(new ChatOptions
+        {
+            Temperature = agent.Temperature,
+            MaxTokens = agent.MaxTokens
+        }, cancellationToken))
+        {
+            switch (update)
+            {
+                case ChatTurnTextDelta textDelta:
+                    await WriteSseAsync(response, "text-delta", new { delta = textDelta.Delta }, cancellationToken);
+                    break;
+                case ChatTurnUsage usage:
+                    await WriteSseAsync(response, "usage", new
+                    {
+                        inputTokens = usage.Usage.PromptTokens,
+                        outputTokens = usage.Usage.CompletionTokens
+                    }, cancellationToken);
+                    break;
+                case ChatTurnPendingApproval pendingApproval:
+                {
+                    var pendingApprovalDto = await CreatePendingApprovalAsync(
+                        conversation,
+                        assistantMessage.Id,
+                        pendingApproval.PendingApprovalRequest,
+                        pendingApproval.Response.Message?.TextContent ?? string.Empty,
+                        cancellationToken);
+
+                    approval.Status = toolResult.IsSuccess ? ToolApprovalStatus.Completed : ToolApprovalStatus.Failed;
+                    approval.CompletedAtUtc = DateTimeOffset.UtcNow;
+
+                    var waitingContent = $"Command approval required for {pendingApproval.PendingApprovalRequest.ToolName}.";
+                    await conversationService.UpdateMessageAsync(
+                        assistantMessage,
+                        waitingContent,
+                        false,
+                        null,
+                        null,
+                        null,
+                        cancellationToken);
+
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                    await conversationService.TouchConversationAsync(conversation, cancellationToken);
+
+                    await WriteSseAsync(response, "approval-required", pendingApprovalDto, cancellationToken);
+                    await WriteSseAsync(response, "final-message", new { content = waitingContent, finishReason = (string?)null, inputTokens = (int?)null, outputTokens = (int?)null }, cancellationToken);
+                    await WriteSseAsync(response, "completed", new { finishReason = "approval_required" }, cancellationToken);
+                    return;
+                }
+                case ChatTurnCompleted completed:
+                {
+                    if (!completed.Response.IsSuccess)
+                    {
+                        throw new InvalidOperationException(completed.Response.ErrorMessage ?? "Failed to resume chat after tool approval.");
+                    }
+
+                    approval.Status = toolResult.IsSuccess ? ToolApprovalStatus.Completed : ToolApprovalStatus.Failed;
+                    approval.CompletedAtUtc = DateTimeOffset.UtcNow;
+
+                    var finalContent = completed.Response.Message?.TextContent ?? string.Empty;
+                    await conversationService.UpdateMessageAsync(
+                        assistantMessage,
+                        finalContent,
+                        false,
+                        completed.Response.FinishReason,
+                        completed.Response.Usage?.PromptTokens,
+                        completed.Response.Usage?.CompletionTokens,
+                        cancellationToken);
+
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                    await conversationService.TouchConversationAsync(conversation, cancellationToken);
+
+                    await WriteSseAsync(response, "final-message", new
+                    {
+                        content = finalContent,
+                        finishReason = completed.Response.FinishReason,
+                        inputTokens = completed.Response.Usage?.PromptTokens,
+                        outputTokens = completed.Response.Usage?.CompletionTokens
+                    }, cancellationToken);
+                    await WriteSseAsync(response, "completed", new { finishReason = completed.Response.FinishReason }, cancellationToken);
+                    return;
+                }
+                case ChatTurnError error:
+                    throw new InvalidOperationException(error.ErrorMessage);
+            }
+        }
+
+        throw new InvalidOperationException("Approval resume stream ended without a terminal update.");
+    }
+
     private static IReadOnlyList<ChatMessage> BuildResumeHistory(Conversation conversation, Guid assistantPlaceholderId, ToolApprovalRequestEntity approval)
     {
         var history = new List<ChatMessage>
@@ -227,4 +393,12 @@ public sealed class ToolApprovalService(
             entity.RequestedAtUtc,
             entity.DecidedAtUtc,
             entity.CompletedAtUtc);
+
+    private static async Task WriteSseAsync(HttpResponse response, string eventName, object payload, CancellationToken cancellationToken)
+    {
+        var json = JsonSerializer.Serialize(payload, SseJsonOptions);
+        await response.WriteAsync($"event: {eventName}\n", cancellationToken);
+        await response.WriteAsync($"data: {json}\n\n", cancellationToken);
+        await response.Body.FlushAsync(cancellationToken);
+    }
 }

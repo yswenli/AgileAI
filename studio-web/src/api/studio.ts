@@ -198,26 +198,7 @@ export async function resolveToolApproval(approvalId: string, approved: boolean,
   }
 }
 
-export interface StreamHandlers {
-  onStart?: (payload: ChatStreamStart) => void
-  onDelta?: (delta: string) => void
-  onUsage?: (payload: { inputTokens?: number | null; outputTokens?: number | null }) => void
-  onCompleted?: (payload: { finishReason?: string | null }) => void
-  onFinalMessage?: (payload: { content: string; finishReason?: string | null; inputTokens?: number | null; outputTokens?: number | null }) => void
-  onApprovalRequired?: (payload: ToolApprovalItem) => void
-  onError?: (message: string) => void
-}
-
-export async function streamMessage(conversationId: string, content: string, handlers: StreamHandlers) {
-  const baseUrl = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5117/api').replace(/\/$/, '')
-  const response = await fetch(`${baseUrl}/conversations/${conversationId}/stream`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ content }),
-  })
-
+async function consumeSseResponse(response: Response, handlers: StreamHandlers) {
   if (!response.ok || !response.body) {
     throw new Error('Unable to start streaming response.')
   }
@@ -244,8 +225,8 @@ export async function streamMessage(conversationId: string, content: string, han
       return
     }
 
-        const payload = JSON.parse(data)
-        switch (eventName) {
+    const payload = JSON.parse(data)
+    switch (eventName) {
       case 'message-created':
         handlers.onStart?.({
           ...payload,
@@ -294,4 +275,40 @@ export async function streamMessage(conversationId: string, content: string, han
   if (finalChunk) {
     emitEvent(finalChunk)
   }
+}
+
+export async function resolveToolApprovalStream(approvalId: string, approved: boolean, comment: string | undefined, handlers: StreamHandlers) {
+  const baseUrl = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5117/api').replace(/\/$/, '')
+  const response = await fetch(`${baseUrl}/tool-approvals/${approvalId}/resolve/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ approved, comment }),
+  })
+
+  await consumeSseResponse(response, handlers)
+}
+
+export interface StreamHandlers {
+  onStart?: (payload: ChatStreamStart) => void
+  onDelta?: (delta: string) => void
+  onUsage?: (payload: { inputTokens?: number | null; outputTokens?: number | null }) => void
+  onCompleted?: (payload: { finishReason?: string | null }) => void
+  onFinalMessage?: (payload: { content: string; finishReason?: string | null; inputTokens?: number | null; outputTokens?: number | null }) => void
+  onApprovalRequired?: (payload: ToolApprovalItem) => void
+  onError?: (message: string) => void
+}
+
+export async function streamMessage(conversationId: string, content: string, handlers: StreamHandlers) {
+  const baseUrl = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5117/api').replace(/\/$/, '')
+  const response = await fetch(`${baseUrl}/conversations/${conversationId}/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ content }),
+  })
+
+  await consumeSseResponse(response, handlers)
 }
