@@ -14,6 +14,7 @@ public class AgentExecutionService(
     AgentService agentService,
     ModelCatalogService modelCatalogService,
     ProviderClientFactory providerClientFactory,
+    IServiceProvider serviceProvider,
     IAgentRuntime agentRuntime,
     ISkillRegistry skillRegistry,
     ISessionStore sessionStore,
@@ -547,6 +548,7 @@ public class AgentExecutionService(
             .WithToolRegistry(toolRegistry)
             .WithMaxToolLoopIterations(StudioMaxToolLoopIterations)
             .WithToolExecutionGate(toolExecutionGate)
+            .UseServiceProvider(serviceProvider)
             .WithConversationId(conversation.Id.ToString())
             .WithHistory(history)
             .Build();

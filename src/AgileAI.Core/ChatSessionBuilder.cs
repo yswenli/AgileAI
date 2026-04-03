@@ -13,6 +13,9 @@ public class ChatSessionBuilder(IChatClient chatClient, string modelId)
     private IToolExecutionGate? _toolExecutionGate;
     private string? _sessionId;
     private string? _conversationId;
+    private IReadOnlyList<IChatTurnMiddleware>? _chatTurnMiddlewares;
+    private IReadOnlyList<IStreamingChatTurnMiddleware>? _streamingChatTurnMiddlewares;
+    private IReadOnlyList<IToolExecutionMiddleware>? _toolExecutionMiddlewares;
 
     public ChatSessionBuilder WithToolRegistry(IToolRegistry? toolRegistry)
     {
@@ -27,6 +30,12 @@ public class ChatSessionBuilder(IChatClient chatClient, string modelId)
     }
 
     public ChatSessionBuilder WithServiceProvider(IServiceProvider? serviceProvider)
+    {
+        _serviceProvider = serviceProvider;
+        return this;
+    }
+
+    public ChatSessionBuilder UseServiceProvider(IServiceProvider? serviceProvider)
     {
         _serviceProvider = serviceProvider;
         return this;
@@ -56,6 +65,24 @@ public class ChatSessionBuilder(IChatClient chatClient, string modelId)
         return this;
     }
 
+    public ChatSessionBuilder WithChatTurnMiddleware(IEnumerable<IChatTurnMiddleware> chatTurnMiddlewares)
+    {
+        _chatTurnMiddlewares = chatTurnMiddlewares.ToList();
+        return this;
+    }
+
+    public ChatSessionBuilder WithStreamingChatTurnMiddleware(IEnumerable<IStreamingChatTurnMiddleware> streamingChatTurnMiddlewares)
+    {
+        _streamingChatTurnMiddlewares = streamingChatTurnMiddlewares.ToList();
+        return this;
+    }
+
+    public ChatSessionBuilder WithToolExecutionMiddleware(IEnumerable<IToolExecutionMiddleware> toolExecutionMiddlewares)
+    {
+        _toolExecutionMiddlewares = toolExecutionMiddlewares.ToList();
+        return this;
+    }
+
     public ChatSessionBuilder WithHistory(IEnumerable<ChatMessage> history)
     {
         _history = history.ToList();
@@ -73,7 +100,10 @@ public class ChatSessionBuilder(IChatClient chatClient, string modelId)
             _sessionId,
             _conversationId,
             _serviceProvider,
-            _logger);
+            _logger,
+            _chatTurnMiddlewares,
+            _streamingChatTurnMiddlewares,
+            _toolExecutionMiddlewares);
 
         foreach (var message in _history)
         {

@@ -38,6 +38,70 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
+    public static IServiceCollection AddAgentExecutionMiddleware<TMiddleware>(this IServiceCollection services)
+        where TMiddleware : class, IAgentExecutionMiddleware
+    {
+        services.AddSingleton<IAgentExecutionMiddleware, TMiddleware>();
+        return services;
+    }
+
+    public static IServiceCollection AddChatTurnMiddleware<TMiddleware>(this IServiceCollection services)
+        where TMiddleware : class, IChatTurnMiddleware
+    {
+        services.AddSingleton<IChatTurnMiddleware, TMiddleware>();
+        return services;
+    }
+
+    public static IServiceCollection AddStreamingChatTurnMiddleware<TMiddleware>(this IServiceCollection services)
+        where TMiddleware : class, IStreamingChatTurnMiddleware
+    {
+        services.AddSingleton<IStreamingChatTurnMiddleware, TMiddleware>();
+        return services;
+    }
+
+    public static IServiceCollection AddToolExecutionMiddleware<TMiddleware>(this IServiceCollection services)
+        where TMiddleware : class, IToolExecutionMiddleware
+    {
+        services.AddSingleton<IToolExecutionMiddleware, TMiddleware>();
+        return services;
+    }
+
+    public static IServiceCollection AddLoggingChatTurnMiddleware(this IServiceCollection services, Action<LoggingMiddlewareOptions>? configure = null)
+    {
+        var options = new LoggingMiddlewareOptions();
+        configure?.Invoke(options);
+        services.AddSingleton(options);
+        services.AddSingleton<IChatTurnMiddleware, LoggingChatTurnMiddleware>();
+        return services;
+    }
+
+    public static IServiceCollection AddLoggingStreamingChatTurnMiddleware(this IServiceCollection services, Action<LoggingMiddlewareOptions>? configure = null)
+    {
+        var options = new LoggingMiddlewareOptions();
+        configure?.Invoke(options);
+        services.AddSingleton(options);
+        services.AddSingleton<IStreamingChatTurnMiddleware, LoggingStreamingChatTurnMiddleware>();
+        return services;
+    }
+
+    public static IServiceCollection AddLoggingToolExecutionMiddleware(this IServiceCollection services, Action<LoggingMiddlewareOptions>? configure = null)
+    {
+        var options = new LoggingMiddlewareOptions();
+        configure?.Invoke(options);
+        services.AddSingleton(options);
+        services.AddSingleton<IToolExecutionMiddleware, LoggingToolExecutionMiddleware>();
+        return services;
+    }
+
+    public static IServiceCollection AddToolPolicyMiddleware(this IServiceCollection services, Action<ToolPolicyOptions>? configure)
+    {
+        var options = new ToolPolicyOptions();
+        configure?.Invoke(options);
+        services.AddSingleton(options);
+        services.AddSingleton<IToolExecutionMiddleware, ToolPolicyMiddleware>();
+        return services;
+    }
+
     public static IServiceCollection AddLocalSkills(this IServiceCollection services, Action<LocalSkillsOptions>? configure = null)
     {
         var options = new LocalSkillsOptions();

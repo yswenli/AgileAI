@@ -6,6 +6,7 @@ using AgileAI.Extensions.FileSystem;
 using AgileAI.Studio.Api.Tools;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AgileAI.Tests;
@@ -123,12 +124,14 @@ public class ToolApprovalServiceTests
         var processExecutionService = new ProcessExecutionService();
         var studioRegistryFactory = new StudioToolRegistryFactory(fileSystemFactory, new RunLocalCommandTool(processExecutionService));
         var agentService = new AgentService(dbContext, modelCatalogService, studioRegistryFactory, skillRegistry);
+        var serviceProvider = new ServiceCollection().BuildServiceProvider();
         var toolApprovalService = new ToolApprovalService(
             dbContext,
             conversationService,
             agentService,
             modelCatalogService,
             new ProviderClientFactory(NullLoggerFactory.Instance),
+            serviceProvider,
             studioRegistryFactory);
 
         var created = await toolApprovalService.CreatePendingApprovalAsync(

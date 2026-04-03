@@ -8,15 +8,18 @@ public class PromptSkillExecutor : ISkillExecutor
     private readonly IChatClient _chatClient;
     private readonly IToolRegistry? _toolRegistry;
     private readonly ILogger<PromptSkillExecutor>? _logger;
+    private readonly IReadOnlyList<IChatTurnMiddleware> _chatTurnMiddlewares;
 
     public PromptSkillExecutor(
         IChatClient chatClient,
         IToolRegistry? toolRegistry = null,
-        ILogger<PromptSkillExecutor>? logger = null)
+        ILogger<PromptSkillExecutor>? logger = null,
+        IEnumerable<IChatTurnMiddleware>? chatTurnMiddlewares = null)
     {
         _chatClient = chatClient;
         _toolRegistry = toolRegistry;
         _logger = logger;
+        _chatTurnMiddlewares = chatTurnMiddlewares?.ToList() ?? [];
     }
 
     public async Task<AgentResult> ExecuteAsync(
@@ -54,12 +57,32 @@ public class PromptSkillExecutor : ISkillExecutor
             insertedMessages,
             toolCount);
 
-        var response = await _chatClient.CompleteAsync(new ChatRequest
+        var middlewareContext = new ChatTurnExecutionContext
         {
+            Kind = ChatTurnExecutionKind.PromptSkill,
             ModelId = modelId,
-            Messages = messages,
-            Options = options
-        }, cancellationToken);
+            Input = context.Request.Input,
+            Messages = messages.AsReadOnly(),
+            Options = options,
+            ServiceProvider = context.ServiceProvider
+        };
+
+        var turnResult = await MiddlewarePipeline.ExecuteAsync(
+            _chatTurnMiddlewares,
+            middlewareContext,
+            static (middleware, executionContext, next, ct) => middleware.InvokeAsync(executionContext, next, ct),
+            async () => new ChatTurnResult
+            {
+                Response = await _chatClient.CompleteAsync(new ChatRequest
+                {
+                    ModelId = modelId,
+                    Messages = messages,
+                    Options = middlewareContext.Options
+                }, cancellationToken)
+            },
+            cancellationToken);
+
+        var response = turnResult.Response;
 
         _logger?.LogInformation(
             "Local skill execution completed. Skill={SkillName}, Success={Success}, Error={Error}",

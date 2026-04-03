@@ -17,6 +17,9 @@ var providerName = Environment.GetEnvironmentVariable("OPENAI_COMPATIBLE_PROVIDE
 var rootPath = Environment.GetEnvironmentVariable("AGILEAI_FILETOOLS_ROOT") ?? Directory.GetCurrentDirectory();
 
 services.AddAgileAI();
+services.AddLoggingChatTurnMiddleware();
+services.AddLoggingToolExecutionMiddleware(options => options.LogToolArguments = true);
+services.AddToolPolicyMiddleware(options => options.DeniedToolNames = ["write_file", "delete_file", "delete_directory"]);
 services.AddOpenAICompatibleProvider(options =>
 {
     options.ProviderName = providerName;
@@ -35,6 +38,7 @@ var toolRegistry = new InMemoryToolRegistry()
     });
 
 var session = new ChatSessionBuilder(chatClient, $"{providerName}:{model}")
+    .UseServiceProvider(serviceProvider)
     .WithToolRegistry(toolRegistry)
     .Build();
 

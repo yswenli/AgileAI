@@ -15,6 +15,7 @@ public sealed class ToolApprovalService(
     AgentService agentService,
     ModelCatalogService modelCatalogService,
     ProviderClientFactory providerClientFactory,
+    IServiceProvider serviceProvider,
     StudioToolRegistryFactory toolRegistryFactory)
 {
     private const int StudioMaxToolLoopIterations = 12;
@@ -81,6 +82,7 @@ public sealed class ToolApprovalService(
             .WithToolRegistry(toolRegistry)
             .WithMaxToolLoopIterations(StudioMaxToolLoopIterations)
             .WithToolExecutionGate(new StudioToolExecutionGate())
+            .UseServiceProvider(serviceProvider)
             .WithConversationId(conversation.Id.ToString())
             .WithHistory(BuildResumeHistory(conversation, assistantMessage.Id, approval))
             .Build();
@@ -204,6 +206,7 @@ public sealed class ToolApprovalService(
             .WithToolRegistry(toolRegistry)
             .WithMaxToolLoopIterations(StudioMaxToolLoopIterations)
             .WithToolExecutionGate(new StudioToolExecutionGate())
+            .UseServiceProvider(serviceProvider)
             .WithConversationId(conversation.Id.ToString())
             .WithHistory(BuildResumeHistory(conversation, assistantMessage.Id, approval))
             .Build();

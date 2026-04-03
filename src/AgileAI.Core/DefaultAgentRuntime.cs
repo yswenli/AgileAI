@@ -14,6 +14,7 @@ public class DefaultAgentRuntime : IAgentRuntime
     private readonly ISkillPlanner? _skillPlanner;
     private readonly ISessionStore? _sessionStore;
     private readonly ISkillContinuationPolicy? _skillContinuationPolicy;
+    private readonly IReadOnlyList<IAgentExecutionMiddleware> _executionMiddlewares;
 
     public DefaultAgentRuntime(
         IChatClient chatClient,
@@ -23,7 +24,8 @@ public class DefaultAgentRuntime : IAgentRuntime
         ILogger<DefaultAgentRuntime>? logger = null,
         ISkillPlanner? skillPlanner = null,
         ISessionStore? sessionStore = null,
-        ISkillContinuationPolicy? skillContinuationPolicy = null)
+        ISkillContinuationPolicy? skillContinuationPolicy = null,
+        IEnumerable<IAgentExecutionMiddleware>? executionMiddlewares = null)
     {
         _chatClient = chatClient;
         _skillRegistry = skillRegistry;
@@ -33,6 +35,7 @@ public class DefaultAgentRuntime : IAgentRuntime
         _skillPlanner = skillPlanner;
         _sessionStore = sessionStore;
         _skillContinuationPolicy = skillContinuationPolicy;
+        _executionMiddlewares = executionMiddlewares?.ToList() ?? [];
     }
 
     public async Task<AgentResult> ExecuteAsync(AgentRequest request, CancellationToken cancellationToken = default)
@@ -49,6 +52,28 @@ public class DefaultAgentRuntime : IAgentRuntime
         var effectiveHistory = request.History ?? sessionState?.History;
         var effectiveRequest = request with { History = effectiveHistory };
 
+        var context = new AgentExecutionContext
+        {
+            OriginalRequest = request,
+            Request = effectiveRequest,
+            ModelId = modelId,
+            SessionState = sessionState,
+            ServiceProvider = _serviceProvider
+        };
+
+        return await MiddlewarePipeline.ExecuteAsync(
+            _executionMiddlewares,
+            context,
+            static (middleware, executionContext, next, ct) => middleware.InvokeAsync(executionContext, next, ct),
+            () => ExecuteCoreAsync(context, cancellationToken),
+            cancellationToken);
+    }
+
+    private async Task<AgentResult> ExecuteCoreAsync(AgentExecutionContext context, CancellationToken cancellationToken)
+    {
+        var effectiveRequest = context.Request;
+        var sessionState = context.SessionState;
+
         ISkill? resolvedSkill = null;
         if (effectiveRequest.EnableSkills)
         {
@@ -56,7 +81,7 @@ public class DefaultAgentRuntime : IAgentRuntime
             if (resolvedSkill != null)
             {
                 _logger?.LogInformation("Executing request with resolved skill {SkillName}", resolvedSkill.Name);
-                var result = await resolvedSkill.ExecuteAsync(CreateSkillContext(effectiveRequest, modelId, resolvedSkill), cancellationToken);
+                var result = await resolvedSkill.ExecuteAsync(CreateSkillContext(effectiveRequest, context.ModelId, resolvedSkill), cancellationToken);
                 await PersistSessionStateAsync(effectiveRequest, sessionState, result.UpdatedHistory, resolvedSkill.Name, cancellationToken);
 
                 _logger?.LogInformation(
@@ -71,7 +96,7 @@ public class DefaultAgentRuntime : IAgentRuntime
             _logger?.LogInformation("No skill selected. Falling back to plain chat execution.");
         }
 
-        var plainResult = await ExecutePlainChatAsync(effectiveRequest, modelId, cancellationToken);
+        var plainResult = await ExecutePlainChatAsync(effectiveRequest, context.ModelId, cancellationToken);
         await PersistSessionStateAsync(effectiveRequest, sessionState, plainResult.UpdatedHistory, activeSkill: null, cancellationToken);
 
         _logger?.LogInformation(

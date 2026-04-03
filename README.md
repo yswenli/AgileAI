@@ -282,6 +282,89 @@ If you prefer DI-based registration, `AgileAI.Extensions.FileSystem` also expose
 - `services.AddAgileAIFileSystemTools(...)`
 - `services.AddFileSystemTools(...)`
 
+### Middleware / AOP-style Execution Hooks
+
+AgileAI core now supports middleware-style interception around runtime execution, chat turns, streaming turns, and tool execution.
+
+Register middleware globally through DI:
+
+```csharp
+using AgileAI.Abstractions;
+using AgileAI.Core;
+using AgileAI.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
+
+var services = new ServiceCollection();
+
+services.AddAgileAI();
+services.AddChatTurnMiddleware<LoggingChatTurnMiddleware>();
+services.AddToolExecutionMiddleware<ToolAuditMiddleware>();
+
+var serviceProvider = services.BuildServiceProvider();
+var chatClient = serviceProvider.GetRequiredService<IChatClient>();
+
+var session = new ChatSessionBuilder(chatClient, "openai:gpt-4o")
+    .UseServiceProvider(serviceProvider)
+    .Build();
+```
+
+AgileAI.Core also includes built-in middleware for common cases:
+
+```csharp
+services.AddAgileAI();
+services.AddLoggingChatTurnMiddleware();
+services.AddLoggingToolExecutionMiddleware(options => options.LogToolArguments = true);
+services.AddToolPolicyMiddleware(options => options.DeniedToolNames = ["run_local_command"]);
+
+var serviceProvider = services.BuildServiceProvider();
+var chatClient = serviceProvider.GetRequiredService<IChatClient>();
+
+var session = new ChatSessionBuilder(chatClient, "openai:gpt-4o")
+    .UseServiceProvider(serviceProvider)
+    .Build();
+```
+
+Built-in middleware defaults are intentionally conservative:
+
+- `AddLoggingChatTurnMiddleware()` logs turn lifecycle and success state, but not full prompt text unless `LogInputs = true`
+- `AddLoggingStreamingChatTurnMiddleware()` logs streaming start/completion/error boundaries instead of every delta token
+- `AddLoggingToolExecutionMiddleware()` logs tool lifecycle, and only includes arguments/results when explicitly enabled
+- `AddToolPolicyMiddleware()` can allow or deny tool execution by tool name before the real tool runs
+
+Middleware execution follows registration order. With DI registration, the first registered middleware becomes the outermost wrapper. With `ChatSessionBuilder.WithChatTurnMiddleware(...)`, `WithStreamingChatTurnMiddleware(...)`, and `WithToolExecutionMiddleware(...)`, the explicitly supplied middleware list is used for that session. If you want DI-registered middleware to apply, build the session with `.UseServiceProvider(serviceProvider)`.
+
+If you want custom behavior, you can still implement your own middleware classes:
+
+```csharp
+public sealed class LoggingChatTurnMiddleware : IChatTurnMiddleware
+{
+    public async Task<ChatTurnResult> InvokeAsync(
+        ChatTurnExecutionContext context,
+        Func<Task<ChatTurnResult>> next,
+        CancellationToken cancellationToken = default)
+    {
+        Console.WriteLine($"[chat-turn] kind={context.Kind}, input={context.Input}");
+        var result = await next();
+        Console.WriteLine($"[chat-turn] success={result.Response.IsSuccess}");
+        return result;
+    }
+}
+
+public sealed class ToolAuditMiddleware : IToolExecutionMiddleware
+{
+    public async Task<ToolExecutionOutcome> InvokeAsync(
+        ToolExecutionMiddlewareContext context,
+        Func<Task<ToolExecutionOutcome>> next,
+        CancellationToken cancellationToken = default)
+    {
+        Console.WriteLine($"[tool] {context.Tool.Name} args={context.ExecutionContext.ToolCall.Arguments}");
+        return await next();
+    }
+}
+```
+
+For per-session customization, you can also attach middleware directly with `ChatSessionBuilder.WithChatTurnMiddleware(...)`, `WithStreamingChatTurnMiddleware(...)`, and `WithToolExecutionMiddleware(...)`.
+
 ### Direct Usage
 
 ```csharp

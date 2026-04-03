@@ -60,4 +60,29 @@ public class CoreDependencyInjectionTests
 
         Directory.Delete(tempDirectory, recursive: true);
     }
+
+    [Fact]
+    public void AddBuiltInMiddlewareHelpers_ShouldRegisterBuiltInImplementations()
+    {
+        var services = new ServiceCollection();
+
+        services.AddAgileAI();
+        services.AddLoggingChatTurnMiddleware(options => options.LogInputs = true);
+        services.AddLoggingStreamingChatTurnMiddleware();
+        services.AddLoggingToolExecutionMiddleware(options => options.LogToolArguments = true);
+        services.AddToolPolicyMiddleware(options => options.DeniedToolNames = ["dangerous-tool"]);
+
+        var serviceProvider = services.BuildServiceProvider();
+
+        Assert.Contains(serviceProvider.GetServices<IChatTurnMiddleware>(), x => x is LoggingChatTurnMiddleware);
+        Assert.Contains(serviceProvider.GetServices<IStreamingChatTurnMiddleware>(), x => x is LoggingStreamingChatTurnMiddleware);
+        Assert.Contains(serviceProvider.GetServices<IToolExecutionMiddleware>(), x => x is LoggingToolExecutionMiddleware);
+        Assert.Contains(serviceProvider.GetServices<IToolExecutionMiddleware>(), x => x is ToolPolicyMiddleware);
+
+        var loggingOptions = serviceProvider.GetRequiredService<LoggingMiddlewareOptions>();
+        Assert.True(loggingOptions.LogInputs || loggingOptions.LogToolArguments);
+
+        var policyOptions = serviceProvider.GetRequiredService<ToolPolicyOptions>();
+        Assert.Contains("dangerous-tool", policyOptions.DeniedToolNames!);
+    }
 }

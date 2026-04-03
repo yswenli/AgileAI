@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 using AgileAI.Abstractions;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -18,6 +19,8 @@ public class ChatSession : IChatSession
     private readonly IServiceProvider? _serviceProvider;
     private readonly ILogger<ChatSession>? _logger;
     private readonly ToolExecutor _toolExecutor;
+    private readonly IReadOnlyList<IChatTurnMiddleware> _chatTurnMiddlewares;
+    private readonly IReadOnlyList<IStreamingChatTurnMiddleware> _streamingChatTurnMiddlewares;
 
     public IReadOnlyList<ChatMessage> History => _history.AsReadOnly();
 
@@ -30,7 +33,10 @@ public class ChatSession : IChatSession
         string? sessionId = null,
         string? conversationId = null,
         IServiceProvider? serviceProvider = null,
-        ILogger<ChatSession>? logger = null)
+        ILogger<ChatSession>? logger = null,
+        IEnumerable<IChatTurnMiddleware>? chatTurnMiddlewares = null,
+        IEnumerable<IStreamingChatTurnMiddleware>? streamingChatTurnMiddlewares = null,
+        IEnumerable<IToolExecutionMiddleware>? toolExecutionMiddlewares = null)
     {
         _chatClient = chatClient;
         _modelId = modelId;
@@ -41,7 +47,19 @@ public class ChatSession : IChatSession
         _conversationId = conversationId;
         _serviceProvider = serviceProvider;
         _logger = logger;
-        _toolExecutor = new ToolExecutor(_toolExecutionGate, serviceProvider?.GetService(typeof(ILogger<ToolExecutor>)) as ILogger<ToolExecutor>);
+        _chatTurnMiddlewares = chatTurnMiddlewares?.ToList()
+            ?? serviceProvider?.GetServices<IChatTurnMiddleware>().ToList()
+            ?? [];
+        _streamingChatTurnMiddlewares = streamingChatTurnMiddlewares?.ToList()
+            ?? serviceProvider?.GetServices<IStreamingChatTurnMiddleware>().ToList()
+            ?? [];
+        var resolvedToolMiddlewares = toolExecutionMiddlewares?.ToList()
+            ?? serviceProvider?.GetServices<IToolExecutionMiddleware>().ToList()
+            ?? [];
+        _toolExecutor = new ToolExecutor(
+            _toolExecutionGate,
+            serviceProvider?.GetService(typeof(ILogger<ToolExecutor>)) as ILogger<ToolExecutor>,
+            resolvedToolMiddlewares);
     }
 
     public void AddMessage(ChatMessage message)
@@ -67,20 +85,52 @@ public class ChatSession : IChatSession
     {
         AddMessage(ChatMessage.User(message));
 
-        await foreach (var update in ExecuteTurnLoopStreamingAsync(options, cancellationToken).WithCancellation(cancellationToken))
+        var context = new StreamingChatTurnExecutionContext
+        {
+            Kind = ChatTurnExecutionKind.SessionTurn,
+            ModelId = _modelId,
+            Input = message,
+            Messages = _history.AsReadOnly(),
+            Options = options,
+            SessionId = _sessionId,
+            ConversationId = _conversationId,
+            ServiceProvider = _serviceProvider
+        };
+
+        await foreach (var update in ExecuteStreamingWithMiddlewareAsync(context, cancellationToken).WithCancellation(cancellationToken))
         {
             yield return update;
         }
     }
 
     public Task<ChatTurnResult> ContinueAsync(ChatOptions? options = null, CancellationToken cancellationToken = default)
-        => ExecuteTurnLoopAsync(options, cancellationToken);
+        => ExecuteTurnWithMiddlewareAsync(new ChatTurnExecutionContext
+        {
+            Kind = ChatTurnExecutionKind.SessionContinuation,
+            ModelId = _modelId,
+            Messages = _history.AsReadOnly(),
+            Options = options,
+            SessionId = _sessionId,
+            ConversationId = _conversationId,
+            ServiceProvider = _serviceProvider
+        }, cancellationToken);
 
     public async IAsyncEnumerable<ChatTurnStreamUpdate> ContinueStreamAsync(
         ChatOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        await foreach (var update in ExecuteTurnLoopStreamingAsync(options, cancellationToken).WithCancellation(cancellationToken))
+        var context = new StreamingChatTurnExecutionContext
+        {
+            Kind = ChatTurnExecutionKind.SessionContinuation,
+            ModelId = _modelId,
+            Messages = _history.AsReadOnly(),
+            Options = options,
+            SessionId = _sessionId,
+            ConversationId = _conversationId,
+            ServiceProvider = _serviceProvider
+        };
+
+        await foreach (var update in ExecuteStreamingWithMiddlewareAsync(context, cancellationToken).WithCancellation(cancellationToken))
         {
             yield return update;
         }
@@ -89,7 +139,41 @@ public class ChatSession : IChatSession
     public async Task<ChatTurnResult> SendTurnAsync(string message, ChatOptions? options = null, CancellationToken cancellationToken = default)
     {
         AddMessage(ChatMessage.User(message));
-        return await ExecuteTurnLoopAsync(options, cancellationToken);
+        return await ExecuteTurnWithMiddlewareAsync(new ChatTurnExecutionContext
+        {
+            Kind = ChatTurnExecutionKind.SessionTurn,
+            ModelId = _modelId,
+            Input = message,
+            Messages = _history.AsReadOnly(),
+            Options = options,
+            SessionId = _sessionId,
+            ConversationId = _conversationId,
+            ServiceProvider = _serviceProvider
+        }, cancellationToken);
+    }
+
+    private Task<ChatTurnResult> ExecuteTurnWithMiddlewareAsync(
+        ChatTurnExecutionContext context,
+        CancellationToken cancellationToken)
+    {
+        return MiddlewarePipeline.ExecuteAsync(
+            _chatTurnMiddlewares,
+            context,
+            static (middleware, executionContext, next, ct) => middleware.InvokeAsync(executionContext, next, ct),
+            () => ExecuteTurnLoopAsync(context.Options, cancellationToken),
+            cancellationToken);
+    }
+
+    private IAsyncEnumerable<ChatTurnStreamUpdate> ExecuteStreamingWithMiddlewareAsync(
+        StreamingChatTurnExecutionContext context,
+        CancellationToken cancellationToken)
+    {
+        return MiddlewarePipeline.ExecuteStreaming(
+            _streamingChatTurnMiddlewares,
+            context,
+            static (middleware, executionContext, next, ct) => middleware.InvokeAsync(executionContext, next, ct),
+            () => ExecuteTurnLoopStreamingAsync(context.Options, cancellationToken),
+            cancellationToken);
     }
 
     private async Task<ChatTurnResult> ExecuteTurnLoopAsync(ChatOptions? options, CancellationToken cancellationToken)
@@ -97,8 +181,7 @@ public class ChatSession : IChatSession
         var finalOptions = BuildEffectiveOptions(options);
 
         ChatResponse? lastResponse = null;
-            List<ToolResult>? lastToolResults = null;
-            List<string>? lastToolNames = null;
+        List<ToolResult>? lastToolResults = null;
         var iteration = 0;
 
         while (iteration < _maxToolLoopIterations)

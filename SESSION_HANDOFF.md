@@ -1,6 +1,68 @@
 # SESSION_HANDOFF.md — AgileAI 当前交接状态
 
-> 最后更新: 2026-03-29
+> 最后更新: 2026-04-03
+
+---
+
+## 0. 本次新增交接（2026-04-03）
+
+本轮在此前 approval-aware tool execution 的基础上，继续把 core 层扩展成可插拔的 AOP / middleware 执行管线，并补到了可对外使用的易用层。
+
+本次新增并已验证的结果：
+
+- `src/AgileAI.Abstractions` 新增 middleware 契约与上下文：
+  - `IAgentExecutionMiddleware`
+  - `IChatTurnMiddleware`
+  - `IStreamingChatTurnMiddleware`
+  - `IToolExecutionMiddleware`
+  - `AgentExecutionContext`
+  - `ChatTurnExecutionContext`
+  - `StreamingChatTurnExecutionContext`
+  - `ToolExecutionMiddlewareContext`
+  - `ToolExecutionOutcome`
+- `src/AgileAI.Core` 现已在以下真实执行路径支持 middleware：
+  - `DefaultAgentRuntime`
+  - `ChatSession`
+  - `PromptSkillExecutor`
+  - `ToolExecutor`
+- 新增内置 middleware：
+  - `LoggingChatTurnMiddleware`
+  - `LoggingStreamingChatTurnMiddleware`
+  - `LoggingToolExecutionMiddleware`
+  - `ToolPolicyMiddleware`
+- 新增内置配置项：
+  - `LoggingMiddlewareOptions`
+  - `ToolPolicyOptions`
+- `AddAgileAI()` 周边新增 DI helper：
+  - `AddAgentExecutionMiddleware<T>()`
+  - `AddChatTurnMiddleware<T>()`
+  - `AddStreamingChatTurnMiddleware<T>()`
+  - `AddToolExecutionMiddleware<T>()`
+  - `AddLoggingChatTurnMiddleware(...)`
+  - `AddLoggingStreamingChatTurnMiddleware(...)`
+  - `AddLoggingToolExecutionMiddleware(...)`
+  - `AddToolPolicyMiddleware(...)`
+- `ChatSessionBuilder` 新增 `UseServiceProvider(...)`，用于让 builder 创建的 session 自动解析容器注册的 middleware
+- `AgileAI.Studio.Api` 内部通过 builder 创建 session 的路径已接入 `IServiceProvider`，所以 Studio 自己也能吃到容器里的 middleware
+
+本轮验证结果：
+
+- `dotnet test tests/AgileAI.Tests/AgileAI.Tests.csproj --filter "FullyQualifiedName~MiddlewareTests|FullyQualifiedName~CoreDependencyInjectionTests|FullyQualifiedName~ChatSessionBuilderTests|FullyQualifiedName~ToolApprovalServiceTests" /p:UseAppHost=false` ✅
+- `dotnet build src/AgileAI.Core/AgileAI.Core.csproj` ✅
+- `dotnet build samples/FileSystemToolsSample/FileSystemToolsSample.csproj /p:UseAppHost=false` ✅
+- `dotnet build src/AgileAI.Studio.Api/AgileAI.Studio.Api.csproj /p:UseAppHost=false` ✅
+
+本轮文档与示例已更新：
+
+- `README.md` 新增 middleware / AOP-style execution hooks 章节
+- `samples/FileSystemToolsSample/Program.cs` 改为展示内置 logging + tool policy middleware 的用法
+
+当前需要注意的语义：
+
+- middleware 执行顺序遵循注册顺序，先注册的在外层
+- `ChatSessionBuilder.WithChatTurnMiddleware(...)` / `WithStreamingChatTurnMiddleware(...)` / `WithToolExecutionMiddleware(...)` 是显式 session 级覆盖
+- 如果要让 DI 注册的 middleware 自动生效，builder 必须使用 `.UseServiceProvider(serviceProvider)` 或 `.WithServiceProvider(serviceProvider)`
+- `ToolPolicyMiddleware` 当前是**执行前 deny/allow**，不会在模型侧隐藏工具定义；如果后续要减少无效 tool call，可再补一层“请求前过滤可见工具”能力
 
 ---
 
