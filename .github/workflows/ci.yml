@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dotnet:
+    name: .NET build and tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore .NET solution
+        run: dotnet restore "AgileAI.slnx"
+
+      - name: Build .NET solution
+        run: dotnet build "AgileAI.slnx" --configuration Release --no-restore
+
+      - name: Run backend tests
+        run: dotnet test "tests/AgileAI.Tests/AgileAI.Tests.csproj" --configuration Release --no-build
+
+  studio-web:
+    name: Studio web build and e2e
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: studio-web/package-lock.json
+
+      - name: Install studio-web dependencies
+        run: npm ci
+        working-directory: studio-web
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: studio-web
+
+      - name: Build studio-web
+        run: npm run build
+        working-directory: studio-web
+
+      - name: Run Playwright end-to-end suite
+        run: npm run test:e2e
+        working-directory: studio-web
