@@ -125,6 +125,117 @@ test('agent create and edit can configure selected tools with default all checke
   }
 })
 
+test('scroll-loaded lists reveal more providers models and agents on demand', async ({ page, request }) => {
+  test.setTimeout(120_000)
+  await page.setViewportSize({ width: 1280, height: 720 })
+
+  async function expectListCanExpand(itemLocator: ReturnType<typeof page.locator>, loadMoreLabel: string, expectedInitialBatch: number, expectedTotal: number) {
+    await expect
+      .poll(async () => await itemLocator.count(), {
+        message: `${loadMoreLabel} list should render at least the initial batch`,
+      })
+      .toBeGreaterThanOrEqual(expectedInitialBatch)
+
+    const initialCount = await itemLocator.count()
+    expect(initialCount).toBeLessThanOrEqual(expectedTotal)
+
+    const loadMoreButton = page.getByRole('button', { name: loadMoreLabel })
+    if (initialCount < expectedTotal) {
+      await expect(loadMoreButton).toBeVisible()
+      await loadMoreButton.click()
+    }
+
+    await expect(itemLocator).toHaveCount(expectedTotal)
+  }
+
+  const stamp = Date.now()
+  const providerPrefix = `PW Scroll Provider ${stamp}`
+  const modelPrefix = `PW Scroll Model ${stamp}`
+  const agentPrefix = `PW Scroll Agent ${stamp}`
+
+  const createdProviderIds: string[] = []
+
+  for (let index = 0; index < 10; index += 1) {
+    const providerCreateResponse = await request.post('http://127.0.0.1:5117/api/provider-connections', {
+      data: {
+        name: `${providerPrefix} ${index + 1}`,
+        providerType: 1,
+        apiKey: `demo-local-${index + 1}`,
+        baseUrl: 'mock://studio/v1/',
+        endpoint: null,
+        providerName: null,
+        relativePath: null,
+        apiKeyHeaderName: null,
+        authMode: null,
+        apiVersion: null,
+        isEnabled: true,
+      },
+    })
+
+    expect(providerCreateResponse.ok()).toBeTruthy()
+    const createdProvider = await providerCreateResponse.json()
+    createdProviderIds.push(createdProvider.id)
+  }
+
+  const selectedProviderId = createdProviderIds[createdProviderIds.length - 1]
+
+  for (let index = 0; index < 15; index += 1) {
+    const modelCreateResponse = await request.post('http://127.0.0.1:5117/api/models', {
+      data: {
+        providerConnectionId: selectedProviderId,
+        displayName: `${modelPrefix} ${index + 1}`,
+        modelKey: `scroll-model-${index + 1}`,
+        supportsStreaming: true,
+        supportsTools: true,
+        supportsVision: false,
+        isEnabled: true,
+      },
+    })
+
+    expect(modelCreateResponse.ok()).toBeTruthy()
+  }
+
+  const modelListResponse = await request.get('http://127.0.0.1:5117/api/models')
+  expect(modelListResponse.ok()).toBeTruthy()
+  const models = await modelListResponse.json()
+  const selectedModel = models.find((item: { displayName: string; id: string }) => item.displayName === `${modelPrefix} 15`)
+  expect(selectedModel).toBeTruthy()
+
+  for (let index = 0; index < 15; index += 1) {
+    const agentCreateResponse = await request.post('http://127.0.0.1:5117/api/agents', {
+      data: {
+        studioModelId: selectedModel.id,
+        name: `${agentPrefix} ${index + 1}`,
+        description: 'Playwright scroll loading validation agent.',
+        systemPrompt: 'You validate incremental list rendering.',
+        temperature: 0.6,
+        maxTokens: 2048,
+        enableSkills: false,
+        isPinned: false,
+        selectedToolNames: [],
+        allowedSkillNames: [],
+      },
+    })
+
+    expect(agentCreateResponse.ok()).toBeTruthy()
+  }
+
+  await page.goto('/models')
+
+  const scrollProviderCards = page.locator('.provider-card').filter({ hasText: providerPrefix })
+  await expectListCanExpand(scrollProviderCards, 'Load more providers', 8, 10)
+
+  await page.locator('.provider-card', { hasText: `${providerPrefix} 10` }).click()
+
+  const scrollModelCards = page.locator('.model-card').filter({ hasText: modelPrefix })
+  await expectListCanExpand(scrollModelCards, 'Load more models', 12, 15)
+
+  await page.goto('/agents')
+
+  const scrollAgentCards = page.locator('.agent-card').filter({ hasText: agentPrefix })
+  await expectListCanExpand(scrollAgentCards, 'Load more agents', 12, 15)
+})
+
 test('real provider flow can create provider model agent and send a chat message', async ({ page }) => {
   test.skip(!realEndpoint || !realApiKey || !realModelKey, 'Real provider test requires PW_REAL_ENDPOINT, PW_REAL_API_KEY, and PW_REAL_MODEL_KEY.')
   test.setTimeout(120_000)
