@@ -19,13 +19,13 @@
           >
             <template #header>
               <n-space align="center" :size="8">
-                <n-icon size="20" :depth="2"><boat-outline /></n-icon>
+                <n-icon size="20" :depth="2"><logo-ionitron /></n-icon>
                 <n-text strong>{{ agent.name }}</n-text>
                 <n-tag v-if="agent.isPinned" type="success" size="tiny" round>Pinned</n-tag>
               </n-space>
             </template>
             <n-ellipsis :line-clamp="3" :tooltip="false">
-              {{ agent.systemPrompt || 'No system prompt' }}
+              {{ agent.description || 'No description' }}
             </n-ellipsis>
             <template #footer>
               <n-space justify="space-between" align="center">
@@ -122,7 +122,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessage, NButton, NCard, NCheckbox, NCheckboxGroup, NCollapse, NCollapseItem, NForm, NFormItem, NInput, NInputNumber, NModal, NPopconfirm, NSelect, NSwitch, NTag, NIcon, NText, NEllipsis, NSpace } from 'naive-ui'
-import { CreateOutline, TrashOutline, BoatOutline } from '@vicons/ionicons5'
+import { CreateOutline, TrashOutline, LogoIonitron } from '@vicons/ionicons5'
 import { useStudioStore } from '../stores/studio'
 import type { AgentPayload } from '../api/studio'
 import type { AgentItem } from '../types'
