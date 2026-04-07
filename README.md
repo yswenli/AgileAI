@@ -33,6 +33,7 @@ A lightweight .NET AI SDK for building chat applications with provider routing, 
   - prompt-based skill execution
   - active skill continuation policy
   - explicit skill exit phrases and manifest-driven continuation/exit hints
+  - built-in prompt skill demos for indirect JS/Python command workflows through host tools
 - Shared content parts:
   - text parts
   - image URL parts with predictable text fallback on unsupported providers
@@ -172,6 +173,18 @@ AgileAI now includes a reusable approval-aware tool execution model in core pack
 - Studio shows a chat-scoped approval card with the exact command preview, shell, and result status
 
 The reusable part lives in core abstractions and session orchestration. Studio adds the product-specific pieces: SQLite persistence, HTTP endpoints, SSE events, and the browser UI for approving or rejecting a pending command.
+
+### Built-in Script Demo Skill
+
+The repository can include built-in local skills that **demonstrate** JavaScript or Python execution workflows, but the current runtime still loads skills from `SKILL.md` and executes them as prompt skills.
+
+In practice, that means a built-in skill such as `skills/script-demo/SKILL.md` can:
+
+- explain the current architecture limit clearly;
+- generate exact `python -c ...` or `node -e ...` commands;
+- and, in AgileAI.Studio, request execution indirectly through the approval-gated `run_local_command` tool.
+
+It does **not** mean AgileAI currently supports native local skill entrypoints such as `entry: python` or `entry: js`. Native script-backed skills would require additional runtime changes beyond the current prompt-skill executor.
 
 ### Built-in Web Fetch Tool
 
