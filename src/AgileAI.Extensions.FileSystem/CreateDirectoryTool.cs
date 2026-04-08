@@ -3,6 +3,7 @@ using AgileAI.Abstractions;
 
 namespace AgileAI.Extensions.FileSystem;
 
+[NeedApproval]
 public class CreateDirectoryTool(FileSystemPathGuard pathGuard) : ITool
 {
     public string Name => "create_directory";

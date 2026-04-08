@@ -4,6 +4,7 @@ using AgileAI.Abstractions;
 
 namespace AgileAI.Extensions.FileSystem;
 
+[NeedApproval]
 public class MoveFileTool(FileSystemPathGuard pathGuard) : ITool
 {
     public string Name => "move_file";

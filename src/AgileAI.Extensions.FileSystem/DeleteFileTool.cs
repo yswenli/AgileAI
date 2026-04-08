@@ -3,6 +3,7 @@ using AgileAI.Abstractions;
 
 namespace AgileAI.Extensions.FileSystem;
 
+[NeedApproval]
 public class DeleteFileTool(FileSystemPathGuard pathGuard, FileSystemToolOptions options) : ITool
 {
     public string Name => "delete_file";
