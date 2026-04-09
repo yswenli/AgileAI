@@ -14,7 +14,8 @@ public sealed class ToolApprovalService(
     ModelCatalogService modelCatalogService,
     ProviderClientFactory providerClientFactory,
     IServiceProvider serviceProvider,
-    StudioToolRegistryFactory toolRegistryFactory)
+    StudioToolRegistryFactory toolRegistryFactory,
+    StudioStreamingTurnFinalizer streamingTurnFinalizer)
 {
     public async Task<ToolApprovalDto> CreatePendingApprovalAsync(
         Conversation conversation,
@@ -262,31 +263,16 @@ public sealed class ToolApprovalService(
                     approval.CompletedAtUtc = DateTimeOffset.UtcNow;
 
                     var waitingContent = $"Command approval required for {pendingApproval.PendingApprovalRequest.ToolName}.";
-                    await conversationService.UpdateMessageAsync(
+                    await streamingTurnFinalizer.FinalizePendingApprovalAsync(
+                        conversation,
                         assistantMessage,
+                        response,
                         waitingContent,
-                        false,
-                        null,
-                        null,
-                        null,
+                        pendingApprovalDto,
                         assistantMessage.AppliedSkillName,
                         pendingApproval.ToolNames,
+                        async ct => await dbContext.SaveChangesAsync(ct),
                         cancellationToken);
-
-                    await dbContext.SaveChangesAsync(cancellationToken);
-                    await conversationService.TouchConversationAsync(conversation, cancellationToken);
-
-                    await StudioSseWriter.WriteAsync(response, "approval-required", pendingApprovalDto, cancellationToken);
-                    await StudioSseWriter.WriteAsync(response, "final-message", new
-                    {
-                        content = waitingContent,
-                        finishReason = (string?)null,
-                        inputTokens = (int?)null,
-                        outputTokens = (int?)null,
-                        appliedSkillName = assistantMessage.AppliedSkillName,
-                        appliedToolNames = pendingApproval.ToolNames
-                    }, cancellationToken);
-                    await StudioSseWriter.WriteAsync(response, "completed", new { finishReason = "approval_required" }, cancellationToken);
                     return;
                 }
                 case ChatTurnCompleted completed:
@@ -300,30 +286,18 @@ public sealed class ToolApprovalService(
                     approval.CompletedAtUtc = DateTimeOffset.UtcNow;
 
                     var finalContent = completed.Response.Message?.TextContent ?? string.Empty;
-                    await conversationService.UpdateMessageAsync(
+                    await streamingTurnFinalizer.FinalizeCompletedAsync(
+                        conversation,
                         assistantMessage,
+                        response,
                         finalContent,
-                        false,
                         completed.Response.FinishReason,
                         completed.Response.Usage?.PromptTokens,
                         completed.Response.Usage?.CompletionTokens,
                         assistantMessage.AppliedSkillName,
                         completed.ToolNames,
+                        async ct => await dbContext.SaveChangesAsync(ct),
                         cancellationToken);
-
-                    await dbContext.SaveChangesAsync(cancellationToken);
-                    await conversationService.TouchConversationAsync(conversation, cancellationToken);
-
-                    await StudioSseWriter.WriteAsync(response, "final-message", new
-                    {
-                        content = finalContent,
-                        finishReason = completed.Response.FinishReason,
-                        inputTokens = completed.Response.Usage?.PromptTokens,
-                        outputTokens = completed.Response.Usage?.CompletionTokens,
-                        appliedSkillName = assistantMessage.AppliedSkillName,
-                        appliedToolNames = completed.ToolNames
-                    }, cancellationToken);
-                    await StudioSseWriter.WriteAsync(response, "completed", new { finishReason = completed.Response.FinishReason }, cancellationToken);
                     return;
                 }
                 case ChatTurnError error:
