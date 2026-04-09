@@ -174,6 +174,22 @@ AgileAI now includes a reusable approval-aware tool execution model in core pack
 
 The reusable part lives in core abstractions and session orchestration. Studio adds the product-specific pieces: SQLite persistence, HTTP endpoints, SSE events, and the browser UI for approving or rejecting a pending command.
 
+### Workspace Tool Approval Policy
+
+AgileAI.Studio applies the same approval-aware execution model to built-in workspace tools that mutate local state.
+
+- read-only tools such as `list_directory`, `read_file`, `read_files_batch`, and `search_files` do **not** require approval
+- mutating tools such as `write_file`, `patch_file`, `create_directory`, `move_file`, `delete_file`, and `delete_directory` require explicit approval before execution
+- `run_local_command` remains approval-gated for every execution because it can perform arbitrary local actions
+
+This policy is declared in code, not only in UI logic.
+
+- tools can opt into approval by implementing `IApprovalAwareTool`
+- or, for the common case, by adding `[NeedApproval]` to the tool class
+- the runtime resolves approval requirements centrally, so advertised tool metadata and actual execution behavior stay in sync
+
+For new tools, the default rule is simple: if the tool changes files, directories, or other local machine state, mark it as approval-required. If the tool is observational and does not mutate host state, it can remain auto-approved.
+
 ### Built-in Script Demo Skill
 
 The repository can include built-in local skills that **demonstrate** JavaScript or Python execution workflows, but the current runtime still loads skills from `SKILL.md` and executes them as prompt skills.
